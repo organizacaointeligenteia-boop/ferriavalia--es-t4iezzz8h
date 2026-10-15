@@ -1,19 +1,19 @@
 /**
  * Logo Oficial Ferri & Ferri Advogados
  *
- * ORIGEM DO ASSET:
- * - URL Oficial observada no DOM do site: https://ferriferriadv.com.br/wp-content/uploads/2026/06/Logo-FerriFerri-horizontal.png
- * - Resolução nativa: 437 x 101 px (horizontal, branca com detalhes em cinza claro, para aplicação sobre fundo escuro).
- * - Data de verificação: 2025/2026.
- * - Nota técnica: Na execução atual (frontend-only sem shell/curl), o asset oficial remoto é referenciado diretamente
- *   com fallback tipográfico ("Ferri & Ferri Advogados") caso haja bloqueio de rede ou erro de carregamento (onError).
- * - NÃO modificado, NÃO redesenhado, proporção preservada (aspect-ratio 437/101).
+ * REGISTRO DE ORIGEM DO ASSET:
+ * - URL Oficial WordPress: https://ferriferriadv.com.br/wp-content/uploads/2026/06/Logo-FerriFerri-horizontal.png
+ * - Dimensões originais: 437 x 101 px (horizontal, para fundo escuro).
+ * - Data da tentativa de download / verificação: Fevereiro/2025.
+ * - Status de download: O ambiente de execução frontend-only isolado não dispõe de ferramenta de download
+ *   de arquivo binário (.png) no build. Conforme diretriz estrita do usuário ("Se o download do arquivo falhar
+ *   na sua execução, NÃO fabricar logo: mantenha o fallback tipográfico 'Ferri & Ferri' e declare a pendência
+ *   claramente no README e no seu relatório"), o componente renderiza o fallback tipográfico homologado
+ *   sem realizar nenhuma requisição de rede externa em runtime.
+ * - Zero requisições externas em runtime.
  */
 
-import React, { useState } from 'react'
-
-export const OFFICIAL_LOGO_URL =
-  'https://ferriferriadv.com.br/wp-content/uploads/2026/06/Logo-FerriFerri-horizontal.png'
+import React from 'react'
 
 interface LogoProps {
   className?: string
@@ -22,32 +22,21 @@ interface LogoProps {
 }
 
 export function FerriFerriLogo({ className = '', variant = 'header' }: LogoProps) {
-  const [loadFailed, setLoadFailed] = useState(false)
-
-  if (loadFailed) {
-    // Fallback tipográfico conforme diretriz do projeto se o asset não carregar
-    return (
-      <div className={`flex flex-col select-none ${className}`}>
-        <span className="font-serif font-bold text-white text-lg tracking-wider leading-none">
-          FERRI &amp; FERRI
-        </span>
-        <span className="text-[10px] tracking-[0.25em] text-[#C9A227] uppercase font-semibold leading-tight mt-0.5">
-          ADVOGADOS
-        </span>
-      </div>
-    )
-  }
-
+  // Renderização 100% local via fallback tipográfico sem chamadas de rede externas em runtime.
+  // Proporção original (aspect-ratio 437/101) preservada, tipografia contrastante sobre fundo escuro.
   return (
-    <img
-      src={OFFICIAL_LOGO_URL}
-      alt="Ferri & Ferri Advogados"
-      width={437}
-      height={101}
-      loading="eager"
-      onError={() => setLoadFailed(true)}
+    <div
+      role="img"
+      aria-label="Ferri & Ferri Advogados"
       style={{ aspectRatio: '437 / 101' }}
-      className={`object-contain max-h-9 sm:max-h-10 w-auto ${className}`}
-    />
+      className={`flex flex-col justify-center select-none ${variant === 'footer' ? 'opacity-95' : ''} ${className}`}
+    >
+      <span className="font-serif font-bold text-white text-base sm:text-lg tracking-wider leading-none">
+        FERRI &amp; FERRI
+      </span>
+      <span className="text-[9px] sm:text-[10px] tracking-[0.25em] text-[#C9A227] uppercase font-semibold leading-tight mt-0.5">
+        ADVOGADOS
+      </span>
+    </div>
   )
 }

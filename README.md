@@ -16,12 +16,12 @@ Nesta rodada de identidade visual, a interface foi completamente alinhada à ide
   - **Fundos Claros Neutros** (`#F8FAFC` / `#FFFFFF`): Fundos elegantes e sóbrios para leitura e preenchimento de formulários.
   - **Remoção Total de Verdes:** Toda a paleta verde genérica da primeira versão foi substituída, garantindo contraste AA e sobriedade jurídica.
 
-- **Asset Oficial do Logo:**
-  - **Origem exata:** `https://ferriferriadv.com.br/wp-content/uploads/2026/06/Logo-FerriFerri-horizontal.png` (observado diretamente no DOM do cabeçalho do site oficial).
+- **Asset Oficial do Logo e Tratamento de Rede:**
+  - **Origem exata:** `https://ferriferriadv.com.br/wp-content/uploads/2026/06/Logo-FerriFerri-horizontal.png` (observado diretamente no DOM do cabeçalho do WordPress oficial).
   - **Dimensões nativas:** 437 × 101 px (horizontal, tipografia branca sobre fundo escuro).
-  - **Data de verificação:** Fevereiro/2025.
-  - **Aplicação no Frontend:** Servido via componente dedicado `FerriFerriLogo` (`src/components/FerriFerriLogo.tsx`) sobre fundo azul-marinho escuro (`#0A1F33`), preservando a proporção original estrita sem distorção (`aspectRatio: 437/101`) e texto alternativo acessível em pt-BR (`alt="Ferri & Ferri Advogados"`).
-  - **Tratamento de Fallback:** Caso haja bloqueio de rede ou indisponibilidade de carregamento do asset, o componente ativa automaticamente o fallback puramente tipográfico estilizado `"FERRI & FERRI ADVOGADOS"`, sem inventar monogramas ou logotipos alternativos.
+  - **Data da tentativa de download / verificação:** Fevereiro/2025.
+  - **Status do Asset e Regra de Contingência:** Na rodada v0.0.2, o componente realizava chamada remota direta em runtime, violando o princípio de zero chamadas de rede externas. O ambiente de execução frontend-only isolado não dispõe de ferramentas de download de binários (.png). Em estrita conformidade com a instrução do projeto (*"Se o download do arquivo falhar na sua execução, NÃO fabricar logo: mantenha o fallback tipográfico 'Ferri & Ferri' e declare a pendência claramente no README e no seu relatório"*), a URL externa em runtime foi inteiramente removida e o componente passou a exibir o fallback tipográfico homologado `"FERRI & FERRI ADVOGADOS"`.
+  - **Aplicação no Frontend:** Servido via componente dedicado `FerriFerriLogo` (`src/components/FerriFerriLogo.tsx`) sobre fundo azul-marinho escuro (`#0A1F33`), preservando proporção original estrita sem distorção (`aspectRatio: 437/101`), acessibilidade (`aria-label="Ferri & Ferri Advogados"` e `role="img"`), com zero requisições externas em runtime.
 
 ---
 
@@ -59,7 +59,7 @@ Todo o funcionamento é executado 100% no navegador (client-side) em memória Re
 
 ## 4. Pendências Declaradas de Infraestrutura e Governança
 
-1. **Asset do Logo / Deploy Local:** O asset oficial remoto é referenciado diretamente de `https://ferriferriadv.com.br/wp-content/uploads/2026/06/Logo-FerriFerri-horizontal.png` com fallback tipográfico nativo caso haja restrição de CORS em redes fechadas.
+1. **Asset do Logo / Armazenamento Local:** Conforme diretriz estrita, nenhuma URL externa é requisitada em runtime. A origem oficial é `https://ferriferriadv.com.br/wp-content/uploads/2026/06/Logo-FerriFerri-horizontal.png` (verificada em Fevereiro/2025). Como o ambiente de compilação isolado não possui utilitário de download de binário para salvar o arquivo `.png` localmente em `public/` ou `src/assets/`, o sistema opera em conformidade via fallback tipográfico homologado `"FERRI & FERRI ADVOGADOS"`. Para substituir pelo arquivo gráfico real em momento posterior, basta copiar o arquivo `Logo-FerriFerri-horizontal.png` diretamente para a pasta `public/` ou `src/assets/` do repositório sem modificar outras partes do código.
 2. **QR Code e URL Pública:** Pendente de homologação de domínio próprio pelo escritório. Nenhum domínio falso foi introduzido.
 3. **Revisão Ética OAB Obrigatória:** Toda veiculação externa de relatos de atendimento permanece estritamente bloqueada até deliberação do responsável técnico e parecer deontológico da OAB sobre o Provimento n.º 205/2021.
 4. **Segurança e Criptografia:** Em eventual transição para produção, será necessário implementar backend autenticado com 2FA, banco de dados isolado com criptografia em repouso e trilhas de auditoria imutáveis.
