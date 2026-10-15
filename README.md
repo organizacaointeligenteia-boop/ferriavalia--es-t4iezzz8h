@@ -85,7 +85,58 @@ Para viabilizar a geração do QR code estritamente local e sem dependência de 
 
 ---
 
-## 6. Confirmação de Integridade
+## 6. Auditoria de Prontidão e Limites de Segurança (v0.0.8 / Microcorreção Inativa)
+
+Esta seção documenta o estado estrito de prontidão técnica, de governança e de segurança apurado na auditoria:
+
+1. **SQL PostgreSQL Genérico Não Confirmado e Não Aplicável:**
+   - O arquivo `security-rules-draft.sql` (assim como `schema-draft.sql`) é SQL PostgreSQL genérico **NÃO CONFIRMADO** como compatível com Skip Cloud e **NÃO APLICÁVEL / NÃO ATIVAR** até que o motor de banco de dados e os papéis/roles reais sejam formalmente comprovados.
+   - **NADA FOI PROVISIONADO, ATIVADO OU APLICADO**: não há banco provisionado, nem migração executada, nem conexão aberta.
+
+2. **Limites do Motor de Banco de Dados (BYPASSRLS / Owner / Service Role):**
+   - Políticas de RLS em PostgreSQL padrão **NÃO BLOQUEIAM** superusuários de banco, o proprietário da tabela (*table owner*) ou conexões com atributo `BYPASSRLS` / conexões administrativas de serviço (*service_role*).
+   - O rascunho de segurança **NÃO promete nem garante** bloqueio a esses níveis administrativos. Esses limites devem ser verificados e isolados na configuração do cluster e do provedor quando e se houver infraestrutura homologada.
+
+3. **Equipe Ainda Sem Acesso Implementado / `auth.role()` NÃO é Verificação de Staff:**
+   - A cláusula candidata anterior `auth.role() = 'authenticated'` autorizaria indistintamente **qualquer usuário autenticado**, não comprovando pertinência à equipe do escritório.
+   - Como não há mecanismo de equipe comprovado (claims JWT assinados, catálogo interno de operadores ou RBAC), **todas as policies de leitura, inserção, atualização e exclusão foram configuradas como FAIL-CLOSED (`USING (FALSE)` / `WITH CHECK (FALSE)`)**.
+   - Nenhuma policy permissiva residual foi mantida, eliminando brechas decorrentes do operador lógico `OR` que o PostgreSQL emprega entre múltiplas políticas permissivas.
+
+4. **Rate-Limit NÃO Implementado no Endpoint:**
+   - O controle de taxa (*rate-limit*) **NÃO ESTÁ IMPLEMENTADO** em runtime. Existe unicamente como comentário arquitetural descritivo no arquivo de rascunho `src/lib/serverReportEndpointDraft.ts`.
+
+5. **Adapter e Endpoint São Mocks Puros:**
+   - O endpoint e a camada de persistência demonstrativa utilizam a classe em memória `MockDatabaseClient` (`src/lib/serverReportEndpointDraft.ts`), sem qualquer conexão a bancos reais ou drivers de rede.
+
+6. **Idempotência Atual Expõe Metadados a Chaves Reutilizadas:**
+   - A implementação atual de validação de duplicidade na classe `MockDatabaseClient` retorna os metadados do relato já existente (`reportId`, `status`, `receivedAt`) a qualquer cliente que submeta a mesma `idempotency_key`.
+   - Essa abordagem **EXPÕE** dados a quem reusa uma chave alheia e está **PENDENTE DE BLINDAGEM** antes de qualquer uso produtivo.
+
+7. **21 Testes Sintéticos Preparados e NÃO Executados:**
+   - Os 21 casos de teste sintéticos estruturados no módulo `src/lib/syntheticTestsRunner.ts` foram **PREPARADOS** para aferição da lógica de validação em memória, mas **NÃO FORAM EXECUTADOS** nesta rodada de microcorreção inativa.
+   - **Nenhum teste foi executado contra banco de dados real.**
+
+8. **Ausência de Integração e Bloqueio de Publicação / QR de Placa:**
+   - **NÃO declarar integração pronta.** Nenhuma integração com serviços externos ou nuvem existe.
+   - Nenhuma publicação, deploy, configuração de DNS ou impressão/distribuição de QR code de placa está autorizada. O QR code demonstrativo da aplicação permanece restrito à visualização local sem destino público homologado.
+
+---
+
+## 7. Próximos Passos Seguros (Planejamento da Próxima Rodada — NÃO Implementado Nesta Rodada)
+
+Para futura rodada que venha a tratar da camada de backend e resiliência (sujeita a prévia autorização e sem código novo adicionado nesta rodada):
+
+1. **Blindagem de Idempotência contra Vazamento de Metadados:**
+   - Reformular a resposta de chave duplicada para que ela **NÃO revele** metadados de relato (`reportId`, status ou data de recepção) a quem submeter uma chave preexistente pertencente a outro remetente.
+   - Avaliar emissão de resposta canônica neutra de aceitação sem eco de detalhes internos, ou vinculação criptográfica da chave de idempotência ao remetente/sessão legítima.
+
+2. **Rate Limiter Injetado com Default-Deny:**
+   - Especificar componente de controle de taxa (*rate limiter*) desacoplado, com mecanismo de bloqueio preventivo (*default-deny*), permitindo configuração de teto de requisições por janela temporal antes do processamento de carga.
+   - Operar via gate configurável em memória para testes sintéticos, sem dependência de serviços externos de rede nesta fase.
+
+---
+
+## 8. Confirmação de Integridade
 
 - **Nenhum dado real foi coletado ou solicitado.**
 - **Nenhum serviço externo (Asaas, Stripe, IA, banco de dados ou redes) foi conectado.**
