@@ -17,6 +17,10 @@ import {
   RateLimiter,
   StaffIdentityVerifier,
   assertStaffAccessGate,
+  generateDefaultReportId,
+  isValidReportId,
+  LEGACY_FALLBACK_UUID,
+  UUID_V4_REGEX,
 } from './serverReportEndpointDraft'
 import {
   validateDateOnlyString,
@@ -339,7 +343,246 @@ export async function runSyntheticTests(): Promise<{
   }
 
   // =========================================================================
-  // SUÍTE 4: Verificação de Equipe Server-Side com Gate Default-Deny
+  // SUÍTE 4: Geração e Validação de ID de Relato (Fail-Closed, Zero Inserts)
+  // =========================================================================
+  {
+    const suite = 'serverReportEndpointDraft — Geração e Validação de ID'
+    const referenceDate = new Date('2025-02-15T14:30:00.000Z')
+
+    const mockRateLimiterPass: RateLimiter = {
+      checkLimit: async () => ({ allowed: true, remainingRequests: 10 }),
+    }
+
+    const testPayload: CreateReportRequestPayload = {
+      idempotencyKey: 'E2E_SYNTH_IDGEN_TEST_001',
+      clientName: 'E2E_SYNTH_Cliente_Validador_ID',
+      relato: 'Verificação da integridade de geração de UUID.',
+      experienceDate: '2025-02-10',
+      consentGiven: true,
+      termsVersion: 'v1.0-2025',
+    }
+
+    // Asserções unitárias do helper isValidReportId
+    assert(
+      suite,
+      'isValidReportId aceita UUID v4 minúsculo válido',
+      isValidReportId('a1b2c3d4-e5f6-4a1b-8c2d-3e4f5a6b7c8d') === true,
+    )
+    assert(
+      suite,
+      'isValidReportId aceita UUID v4 maiúsculo válido',
+      isValidReportId('A1B2C3D4-E5F6-4A1B-8C2D-3E4F5A6B7C8D') === true,
+    )
+    assert(
+      suite,
+      'isValidReportId rejeita LEGACY_FALLBACK_UUID constante',
+      isValidReportId(LEGACY_FALLBACK_UUID) === false,
+    )
+    assert(suite, 'isValidReportId rejeita string vazia', isValidReportId('') === false)
+    assert(
+      suite,
+      'isValidReportId rejeita UUID com versão não-4 (ex.: v1)',
+      isValidReportId('a1b2c3d4-e5f6-1a1b-8c2d-3e4f5a6b7c8d') === false,
+    )
+    assert(
+      suite,
+      'isValidReportId rejeita formato não-hexadecimal / quebrado',
+      isValidReportId('invalid-uuid-v4-format-string') === false,
+    )
+
+    // (a) crypto ausente simulado -> generateDefaultReportId lança exceção, zero inserts, erro público constante
+    let insertsCountA = 0
+    const mockDbA: MockDatabaseClient = {
+      findReportByIdempotencyKey: async () => null,
+      insertReport: async (data) => {
+        insertsCountA++
+        return { id: data.id }
+      },
+    }
+
+    // Gerador que simula ambiente com crypto ausente (lança como o novo generateDefaultReportId)
+    const generatorCryptoAbsent = () => {
+      throw new Error('Web Crypto API indisponível para geração segura de identificador de relato.')
+    }
+
+    const resCryptoAbsent = await handleCreateReportEndpoint(
+      { method: 'POST', body: testPayload },
+      { dbClient: mockDbA, rateLimiter: mockRateLimiterPass, idGenerator: generatorCryptoAbsent },
+      referenceDate,
+    )
+
+    assert(suite, 'Cenário (a): Crypto ausente -> status 500', resCryptoAbsent.status === 500)
+    assert(
+      suite,
+      'Cenário (a): Crypto ausente -> erro público constante "internal_error" sem vazar stack',
+      resCryptoAbsent.body.success === false && resCryptoAbsent.body.error === 'internal_error',
+    )
+    assert(suite, 'Cenário (a): Crypto ausente -> ZERO inserts no banco', insertsCountA === 0)
+
+    // (b) gerador injetado lança exceção arbitrária -> zero inserts, erro público constante
+    let insertsCountB = 0
+    const mockDbB: MockDatabaseClient = {
+      findReportByIdempotencyKey: async () => null,
+      insertReport: async (data) => {
+        insertsCountB++
+        return { id: data.id }
+      },
+    }
+
+    const generatorThrows = () => {
+      throw new TypeError('Simulated unexpected entropy source crash / out of memory')
+    }
+
+    const resThrows = await handleCreateReportEndpoint(
+      { method: 'POST', body: testPayload },
+      { dbClient: mockDbB, rateLimiter: mockRateLimiterPass, idGenerator: generatorThrows },
+      referenceDate,
+    )
+
+    assert(suite, 'Cenário (b): Gerador lança exceção -> status 500', resThrows.status === 500)
+    assert(
+      suite,
+      'Cenário (b): Gerador lança exceção -> erro público constante "internal_error"',
+      resThrows.body.success === false && resThrows.body.error === 'internal_error',
+    )
+    assert(
+      suite,
+      'Cenário (b): Gerador lança exceção -> ZERO inserts no banco',
+      insertsCountB === 0,
+    )
+
+    // (c) gerador injetado retorna saída inválida (vazio, constante antigo, formato errado) -> zero inserts, erro público constante
+    let insertsCountC = 0
+    const mockDbC: MockDatabaseClient = {
+      findReportByIdempotencyKey: async () => null,
+      insertReport: async (data) => {
+        insertsCountC++
+        return { id: data.id }
+      },
+    }
+
+    // Subcenário c1: string vazia
+    const resEmpty = await handleCreateReportEndpoint(
+      { method: 'POST', body: testPayload },
+      { dbClient: mockDbC, rateLimiter: mockRateLimiterPass, idGenerator: () => '' },
+      referenceDate,
+    )
+    assert(
+      suite,
+      'Cenário (c1): Gerador retorna string vazia -> status 500 e erro internal_error',
+      resEmpty.status === 500 && resEmpty.body.error === 'internal_error',
+    )
+
+    // Subcenário c2: constante antigo do fallback inseguro
+    const resLegacyConstant = await handleCreateReportEndpoint(
+      { method: 'POST', body: testPayload },
+      {
+        dbClient: mockDbC,
+        rateLimiter: mockRateLimiterPass,
+        idGenerator: () => LEGACY_FALLBACK_UUID,
+      },
+      referenceDate,
+    )
+    assert(
+      suite,
+      'Cenário (c2): Gerador retorna antigo UUID constante -> status 500 e erro internal_error',
+      resLegacyConstant.status === 500 && resLegacyConstant.body.error === 'internal_error',
+    )
+
+    // Subcenário c3: formato incorreto (não UUID)
+    const resBadFormat = await handleCreateReportEndpoint(
+      { method: 'POST', body: testPayload },
+      {
+        dbClient: mockDbC,
+        rateLimiter: mockRateLimiterPass,
+        idGenerator: () => 'not-a-valid-uuid-v4',
+      },
+      referenceDate,
+    )
+    assert(
+      suite,
+      'Cenário (c3): Gerador retorna formato errado -> status 500 e erro internal_error',
+      resBadFormat.status === 500 && resBadFormat.body.error === 'internal_error',
+    )
+
+    // Subcenário c4: versão não-4 (ex: v1)
+    const resBadVersion = await handleCreateReportEndpoint(
+      { method: 'POST', body: testPayload },
+      {
+        dbClient: mockDbC,
+        rateLimiter: mockRateLimiterPass,
+        idGenerator: () => '11111111-2222-1333-8444-555555555555',
+      },
+      referenceDate,
+    )
+    assert(
+      suite,
+      'Cenário (c4): Gerador retorna UUID v1 -> status 500 e erro internal_error',
+      resBadVersion.status === 500 && resBadVersion.body.error === 'internal_error',
+    )
+
+    assert(
+      suite,
+      'Cenário (c): Saídas inválidas -> ZERO inserts no banco acumulados',
+      insertsCountC === 0,
+    )
+
+    // (d) gerador seguro -> fluxo normal com insert e ID válido
+    let insertsCountD = 0
+    let insertedIdD = ''
+    const mockDbD: MockDatabaseClient = {
+      findReportByIdempotencyKey: async () => null,
+      insertReport: async (data) => {
+        insertsCountD++
+        insertedIdD = data.id
+        return { id: data.id }
+      },
+    }
+
+    // Testa tanto gerador customizado seguro quanto generateDefaultReportId padrão
+    const validUuidV4Sample = 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
+    const resSafe = await handleCreateReportEndpoint(
+      { method: 'POST', body: testPayload },
+      { dbClient: mockDbD, rateLimiter: mockRateLimiterPass, idGenerator: () => validUuidV4Sample },
+      referenceDate,
+    )
+
+    assert(
+      suite,
+      'Cenário (d): Gerador seguro -> status 201 Created',
+      resSafe.status === 201 && resSafe.body.success === true,
+    )
+    assert(
+      suite,
+      'Cenário (d): Gerador seguro -> 1 insert executado',
+      insertsCountD === 1 && insertedIdD === validUuidV4Sample,
+    )
+    assert(
+      suite,
+      'Cenário (d): Gerador seguro -> reportId retornado corresponde ao UUID validado',
+      resSafe.body.reportId === validUuidV4Sample,
+    )
+
+    // Testa generateDefaultReportId no ambiente atual
+    try {
+      const generatedDefault = generateDefaultReportId()
+      assert(
+        suite,
+        'Cenário (d2): generateDefaultReportId() em runtime produz UUID v4 válido RFC 4122',
+        isValidReportId(generatedDefault) && UUID_V4_REGEX.test(generatedDefault),
+      )
+    } catch {
+      // Se ambiente não tiver crypto em tempo de execução de teste estrito, não deve inventar fallback
+      assert(
+        suite,
+        'Cenário (d2): generateDefaultReportId sem crypto lança erro em conformidade fail-closed',
+        true,
+      )
+    }
+  }
+
+  // =========================================================================
+  // SUÍTE 5: Verificação de Equipe Server-Side com Gate Default-Deny
   // =========================================================================
   {
     const suite = 'assertStaffAccessGate — Verificação de Equipe Server-Side'

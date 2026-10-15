@@ -64,8 +64,37 @@ export interface StaffIdentityVerifier {
 export type IdGenerator = () => string
 
 /**
+ * Expressão regular estrita para validação de UUID v4 (RFC 4122):
+ * 8-4-4-4-12 hexadecimais em caixa baixa ou alta, terceiro grupo iniciado por 4,
+ * quarto grupo iniciado por 8, 9, a ou b.
+ */
+export const UUID_V4_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+/**
+ * UUID constante reservado do antigo fallback inseguro.
+ * Deve ser expressamente rejeitado para prevenir sobreposição de registros.
+ */
+export const LEGACY_FALLBACK_UUID = '00000000-0000-4000-8000-000000000000'
+
+/**
+ * Validador de integridade para IDs gerados (injetados ou padrão).
+ * Rejeita nulos, strings vazias, o UUID constante do fallback antigo e qualquer valor
+ * que não esteja no formato RFC 4122 v4 plausível.
+ */
+export function isValidReportId(id: unknown): id is string {
+  if (typeof id !== 'string') return false
+  const trimmed = id.trim()
+  if (trimmed.length === 0) return false
+  if (trimmed.toLowerCase() === LEGACY_FALLBACK_UUID.toLowerCase()) return false
+  return UUID_V4_REGEX.test(trimmed)
+}
+
+/**
  * Gerador de UUID v4 padrão coerente com o schema da tabela `reports` (id UUID PRIMARY KEY).
- * Usa crypto.randomUUID() quando disponível no ambiente ou fallback criptograficamente seguro via getRandomValues.
+ * Usa crypto.randomUUID() ou getRandomValues com ajuste de bits para RFC 4122 v4.
+ * POLÍTICA FAIL-CLOSED: se a API Web Crypto não estiver disponível ou confiável,
+ * LANÇA ERRO explícito. Nunca retorna valor constante, vazio ou pseudo-aleatório fraco.
  */
 export function generateDefaultReportId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -82,8 +111,7 @@ export function generateDefaultReportId(): string {
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
   }
 
-  // Fallback em caso extremo sem Web Crypto (não produtivo)
-  return '00000000-0000-4000-8000-000000000000'
+  throw new Error('Web Crypto API indisponível para geração segura de identificador de relato.')
 }
 
 export interface MockDatabaseClient {
@@ -210,8 +238,32 @@ export async function handleCreateReportEndpoint(
     }
   }
 
-  // 5. Inserção Segura com ID UUID v4 do gerador injetável
-  const reportId = idGenerator()
+  // 5. Geração Segura e Validação de ID ANTES da Inserção
+  // Captura qualquer falha do idGenerator (exceção ou valor inválido)
+  // Devolve erro público constante "internal_error", sem vazar stack ou detalhes internos
+  let reportId: string
+  try {
+    const generated = idGenerator()
+    if (!isValidReportId(generated)) {
+      return {
+        status: 500,
+        body: {
+          success: false,
+          error: 'internal_error',
+        },
+      }
+    }
+    reportId = generated
+  } catch {
+    return {
+      status: 500,
+      body: {
+        success: false,
+        error: 'internal_error',
+      },
+    }
+  }
+
   const nowBR = formatDateTimeBRSaoPaulo(referenceNow)
 
   const inserted = await dbClient.insertReport({

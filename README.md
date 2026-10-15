@@ -111,14 +111,18 @@ Esta seção documenta o estado estrito de prontidão técnica, de governança e
    - O endpoint candidato (`src/lib/serverReportEndpointDraft.ts`) reformulado para resposta neutra em caso de repetição de chave (`IDEMPOTENT_REPLAY`): retorna apenas `{ success: true, received: true, idempotencyStatus: 'IDEMPOTENT_REPLAY' }`.
    - **NÃO RETORNA** `reportId`, status interno nem `receivedAt` do relato original, impedindo qualquer vazamento de metadados a quem reutilizar chave de idempotência alheia, enquanto preserva a integridade de gravação única no banco.
 
-6. **Identificador de Registro via Gerador Injetável (IMPLEMENTADO EM RASCUNHO, INATIVO, NÃO TESTADO contra runtime real):**
-   - Substituição de `Math.random()` por gerador injetável de IDs (`idGenerator`), com padrão `generateDefaultReportId()` que utiliza `crypto.randomUUID()` quando disponível (ou fallback criptograficamente seguro via `crypto.getRandomValues`), em estrita conformidade com o identificador primário UUID do schema (`reports.id UUID`).
+6. **Identificador de Registro via Gerador Injetável Fail-Closed (IMPLEMENTADO EM RASCUNHO, INATIVO, NÃO TESTADO contra runtime real):**
+   - **Remoção do Fallback Constante Inseguro:** O antigo fallback de UUID fixo (`00000000-0000-4000-8000-000000000000`) foi completamente removido de `generateDefaultReportId()`.
+   - **Política Fail-Closed:** Se a Web Crypto API (`crypto.randomUUID()` e `crypto.getRandomValues`) não estiver disponível ou falhar, a função LANÇA ERRO explícito, nunca retornando valor constante ou vazio.
+   - **Tratamento Seguro no Endpoint e Validação Pré-Insert:** O handler captura qualquer exceção do gerador e valida rigorosamente a saída via regex RFC 4122 v4 (`isValidReportId()`), rejeitando strings vazias, o UUID constante legado e formatos inválidos.
+   - Em caso de qualquer falha na geração ou validação do ID, o endpoint devolve resposta pública constante de erro (`{ success: false, error: 'internal_error' }`) com status 500, sem vazar detalhes técnicos ou stack traces, e com garantia de **ZERO inserts** no banco.
 
 7. **Adapter e Endpoint Continuam Mocks Puros:**
    - O endpoint e a camada de persistência demonstrativa utilizam a interface em memória `MockDatabaseClient` (`src/lib/serverReportEndpointDraft.ts`), sem qualquer conexão a bancos reais, sem SDK de banco, sem Supabase e sem Skip Cloud.
 
-8. **21 Testes Sintéticos PREPARADOS NÃO EXECUTADOS contra runtime real:**
-   - Os testes estruturados no módulo `src/lib/syntheticTestsRunner.ts` (cobrindo calendário, validação, gates de rate limiter, idempotência neutra e verificação de equipe) seguem **PREPARADOS E NÃO EXECUTADOS contra runtime real ou banco de dados externo**.
+8. **Testes Sintéticos PREPARADOS NÃO EXECUTADOS contra runtime real:**
+   - Os testes estruturados no módulo `src/lib/syntheticTestsRunner.ts` foram expandidos para cobrir os cenários de geração de ID: (a) crypto ausente simulado; (b) gerador injetado lançando exceção; (c) gerador injetado retornando saída inválida (vazia, constante antigo, formato errado); e (d) gerador seguro operando normalmente.
+   - Todos os testes seguem **PREPARADOS E NÃO EXECUTADOS contra runtime real ou banco de dados externo**.
    - Toda validação realizada nesta rodada é restrita ao QA estático do projeto.
 
 9. **Ausência de Integração e Bloqueio de Publicação / QR de Placa:**
