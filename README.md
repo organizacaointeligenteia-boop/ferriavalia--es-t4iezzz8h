@@ -17,11 +17,12 @@ Nesta rodada de identidade visual, a interface foi completamente alinhada à ide
   - **Remoção Total de Verdes:** Toda a paleta verde genérica da primeira versão foi substituída, garantindo contraste AA e sobriedade jurídica.
 
 - **Asset Oficial do Logo e Tratamento de Rede:**
-  - **Origem exata:** `https://ferriferriadv.com.br/wp-content/uploads/2026/06/Logo-FerriFerri-horizontal.png` (observado diretamente no DOM do cabeçalho do WordPress oficial).
-  - **Dimensões nativas:** 437 × 101 px (horizontal, tipografia branca sobre fundo escuro).
-  - **Data da tentativa de download / verificação:** Fevereiro/2025.
-  - **Status do Asset e Regra de Contingência:** Na rodada v0.0.2, o componente realizava chamada remota direta em runtime, violando o princípio de zero chamadas de rede externas. O ambiente de execução frontend-only isolado não dispõe de ferramentas de download de binários (.png). Em estrita conformidade com a instrução do projeto (*"Se o download do arquivo falhar na sua execução, NÃO fabricar logo: mantenha o fallback tipográfico 'Ferri & Ferri' e declare a pendência claramente no README e no seu relatório"*), a URL externa em runtime foi inteiramente removida e o componente passou a exibir o fallback tipográfico homologado `"FERRI & FERRI ADVOGADOS"`.
-  - **Aplicação no Frontend:** Servido via componente dedicado `FerriFerriLogo` (`src/components/FerriFerriLogo.tsx`) sobre fundo azul-marinho escuro (`#0A1F33`), preservando proporção original estrita sem distorção (`aspectRatio: 437/101`), acessibilidade (`aria-label="Ferri & Ferri Advogados"` e `role="img"`), com zero requisições externas em runtime.
+  - **Origem exata:** `https://ferriferriadv.com.br/wp-content/uploads/2026/06/Logo-FerriFerri-horizontal.png` (asset público exportado legitimamente do site oficial).
+  - **Dimensões nativas:** 437 × 101 px (horizontal, tipografia/escudo em branco sobre fundo escuro).
+  - **SHA256 original:** `2711c1f8d0a92ad50243c5fbed441f5c94b8d4d9ec28c973cd08e2cb8af1caa0`.
+  - **Origem e data real:** 15/10/2026 (substituindo comentário inventado anterior).
+  - **Status do Asset e Armazenamento Local:** O arquivo oficial PNG foi incorporado como asset local do projeto (`src/assets/eb985729968371dc-01d7c.png`), servido diretamente pelo bundle do Vite. Nenhuma requisição externa ou hotlink é realizada em runtime.
+  - **Aplicação no Frontend:** Servido via componente dedicado `FerriFerriLogo` (`src/components/FerriFerriLogo.tsx`) no header, footer e drawer mobile sobre fundo azul-marinho escuro (`#0A1F33` / `#071624`), preservando rigorosamente a proporção original de 437:101, com `object-contain`, dimensões explícitas e texto alternativo acessível (`alt="Ferri & Ferri Advogados"`).
 
 ---
 
@@ -59,7 +60,7 @@ Todo o funcionamento é executado 100% no navegador (client-side) em memória Re
 
 ## 4. Pendências Declaradas de Infraestrutura e Governança
 
-1. **Asset do Logo / Armazenamento Local:** Conforme diretriz estrita, nenhuma URL externa é requisitada em runtime. A origem oficial é `https://ferriferriadv.com.br/wp-content/uploads/2026/06/Logo-FerriFerri-horizontal.png` (verificada em Fevereiro/2025). Como o ambiente de compilação isolado não possui utilitário de download de binário para salvar o arquivo `.png` localmente em `public/` ou `src/assets/`, o sistema opera em conformidade via fallback tipográfico homologado `"FERRI & FERRI ADVOGADOS"`. Para substituir pelo arquivo gráfico real em momento posterior, basta copiar o arquivo `Logo-FerriFerri-horizontal.png` diretamente para a pasta `public/` ou `src/assets/` do repositório sem modificar outras partes do código.
+1. **Asset do Logo / Armazenamento Local:** CONCLUÍDO. O PNG oficial do logo (437x101 px) com SHA256 `2711c1f8d0a92ad50243c5fbed441f5c94b8d4d9ec28c973cd08e2cb8af1caa0` e origem oficial `https://ferriferriadv.com.br/wp-content/uploads/2026/06/Logo-FerriFerri-horizontal.png` (data real 15/10/2026) foi salvo e incorporado como asset local em `src/assets/eb985729968371dc-01d7c.png`. O componente `FerriFerriLogo` foi atualizado para renderizá-lo com proporção 437:101, sem hotlinks ou chamadas de rede externas em runtime.
 2. **QR Code e URL Pública:** Pendente de homologação de domínio próprio pelo escritório. Nenhum domínio falso foi introduzido.
 3. **Revisão Ética OAB Obrigatória:** Toda veiculação externa de relatos de atendimento permanece estritamente bloqueada até deliberação do responsável técnico e parecer deontológico da OAB sobre o Provimento n.º 205/2021.
 4. **Segurança e Criptografia:** Em eventual transição para produção, será necessário implementar backend autenticado com 2FA, banco de dados isolado com criptografia em repouso e trilhas de auditoria imutáveis.

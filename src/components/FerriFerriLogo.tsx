@@ -3,40 +3,37 @@
  *
  * REGISTRO DE ORIGEM DO ASSET:
  * - URL Oficial WordPress: https://ferriferriadv.com.br/wp-content/uploads/2026/06/Logo-FerriFerri-horizontal.png
- * - Dimensões originais: 437 x 101 px (horizontal, para fundo escuro).
- * - Data da tentativa de download / verificação: Fevereiro/2025.
- * - Status de download: O ambiente de execução frontend-only isolado não dispõe de ferramenta de download
- *   de arquivo binário (.png) no build. Conforme diretriz estrita do usuário ("Se o download do arquivo falhar
- *   na sua execução, NÃO fabricar logo: mantenha o fallback tipográfico 'Ferri & Ferri' e declare a pendência
- *   claramente no README e no seu relatório"), o componente renderiza o fallback tipográfico homologado
- *   sem realizar nenhuma requisição de rede externa em runtime.
- * - Zero requisições externas em runtime.
+ * - SHA256 Original: 2711c1f8d0a92ad50243c5fbed441f5c94b8d4d9ec28c973cd08e2cb8af1caa0
+ * - Dimensões originais: 437 x 101 px (horizontal, para fundo escuro #0A1F33).
+ * - Origem e data real: 15/10/2026.
+ * - Asset servido 100% localmente pelo bundle (src/assets/eb985729968371dc-01d7c.png),
+ *   sem hotlink nem chamadas de rede externas em runtime.
+ * - Proporção preservada: 437:101, object-contain, alt acessível "Ferri & Ferri Advogados".
  */
 
 import React from 'react'
+import logoSrc from '@/assets/eb985729968371dc-01d7c.png'
 
 interface LogoProps {
   className?: string
   priority?: boolean
-  variant?: 'header' | 'footer'
+  variant?: 'header' | 'footer' | 'mobile'
 }
 
 export function FerriFerriLogo({ className = '', variant = 'header' }: LogoProps) {
-  // Renderização 100% local via fallback tipográfico sem chamadas de rede externas em runtime.
-  // Proporção original (aspect-ratio 437/101) preservada, tipografia contrastante sobre fundo escuro.
+  // Proporção 437 x 101 nativa, renderizado sobre fundo escuro (#0A1F33 / #071624),
+  // sem recorte ou distorção, acessível via alt text.
   return (
-    <div
-      role="img"
-      aria-label="Ferri & Ferri Advogados"
+    <img
+      src={logoSrc}
+      alt="Ferri & Ferri Advogados"
+      width={437}
+      height={101}
+      decoding="async"
       style={{ aspectRatio: '437 / 101' }}
-      className={`flex flex-col justify-center select-none ${variant === 'footer' ? 'opacity-95' : ''} ${className}`}
-    >
-      <span className="font-serif font-bold text-white text-base sm:text-lg tracking-wider leading-none">
-        FERRI &amp; FERRI
-      </span>
-      <span className="text-[9px] sm:text-[10px] tracking-[0.25em] text-[#C9A227] uppercase font-semibold leading-tight mt-0.5">
-        ADVOGADOS
-      </span>
-    </div>
+      className={`object-contain max-w-full w-auto select-none ${
+        variant === 'footer' ? 'opacity-95' : ''
+      } ${className}`}
+    />
   )
 }

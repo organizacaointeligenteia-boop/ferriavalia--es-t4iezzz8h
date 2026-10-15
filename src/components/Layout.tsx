@@ -135,12 +135,15 @@ export default function Layout() {
             >
               <div className="space-y-4">
                 <div className="pb-3 border-b border-white/15">
+                  <div className="mb-2">
+                    <FerriFerriLogo variant="mobile" className="h-7" />
+                  </div>
                   <div className="text-xs font-bold text-[#C9A227] uppercase tracking-wider flex items-center gap-1.5">
                     <AlertTriangle className="w-3.5 h-3.5" />
                     Protótipo Demo
                   </div>
                   <p className="text-xs text-slate-300 mt-1">
-                    Ferri &amp; Ferri Advogados — Relatos e Experiência.
+                    Canal Interno de Acolhimento e Relatos.
                   </p>
                 </div>
 
