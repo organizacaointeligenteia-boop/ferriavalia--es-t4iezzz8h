@@ -160,7 +160,7 @@ export default function Painel() {
           </span>
         </span>
         <span className="text-[11px] text-[#A68218] font-semibold">
-          Fuso oficial: America/São Paulo (UTC-3)
+          Fuso oficial: America/Sao_Paulo (Horário de Brasília)
         </span>
       </div>
 

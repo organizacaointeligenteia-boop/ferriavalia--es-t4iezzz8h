@@ -13,7 +13,12 @@ import {
   LayoutDashboard,
 } from 'lucide-react'
 import { useReports } from '@/context/ReportsContext'
-import { isFutureDate, getTodayDateInputValue, formatDateBR } from '@/lib/dateUtils'
+import {
+  isFutureDate,
+  getTodayDateInputValue,
+  formatDateBR,
+  validateDateOnlyString,
+} from '@/lib/dateUtils'
 import { SyntheticReport } from '@/data/mockReports'
 
 export default function Relatar() {
@@ -62,8 +67,13 @@ export default function Relatar() {
 
     if (!experienceDate) {
       newErrors.experienceDate = 'Informe a data em que ocorreu a experiência de atendimento.'
-    } else if (isFutureDate(experienceDate)) {
-      newErrors.experienceDate = 'A data da experiência não pode ser futura.'
+    } else {
+      const dateVal = validateDateOnlyString(experienceDate)
+      if (!dateVal.valid) {
+        newErrors.experienceDate = dateVal.error || 'Data inválida.'
+      } else if (isFutureDate(experienceDate)) {
+        newErrors.experienceDate = 'A data da experiência não pode ser futura.'
+      }
     }
 
     setErrors(newErrors)
@@ -233,8 +243,8 @@ export default function Relatar() {
           <div className="bg-slate-50 p-3 rounded text-xs text-slate-600 border border-slate-200 flex items-center gap-2">
             <Info className="w-4 h-4 text-[#0A1F33] shrink-0" />
             <span>
-              Todos os campos são <strong>opcionais</strong>. Sem perguntas sobre processo, CPF,
-              benefício ou diagnóstico.
+              Nome e relato são <strong>opcionais</strong>; a data da experiência é necessária para
+              contexto cronológico do atendimento. Sem perguntas sobre processo, CPF ou diagnóstico.
             </span>
           </div>
 
@@ -321,7 +331,7 @@ export default function Relatar() {
                 className="font-semibold text-slate-800 flex items-center gap-1.5"
               >
                 <Calendar className="w-3.5 h-3.5 text-slate-500" />
-                Data da Experiência
+                Data da Experiência (Obrigatória)
               </label>
               <span className="text-slate-500">
                 Formato BR: {experienceDate ? formatDateBR(experienceDate) : 'DD/MM/AAAA'}
@@ -333,8 +343,26 @@ export default function Relatar() {
               max={getTodayDateInputValue()}
               value={experienceDate}
               onChange={(e) => {
-                setExperienceDate(e.target.value)
-                if (errors.experienceDate) validateFields()
+                const nextVal = e.target.value
+                setExperienceDate(nextVal)
+                if (errors.experienceDate) {
+                  // Revalida inline
+                  const nextErrors = { ...errors }
+                  if (!nextVal) {
+                    nextErrors.experienceDate =
+                      'Informe a data em que ocorreu a experiência de atendimento.'
+                  } else {
+                    const dateVal = validateDateOnlyString(nextVal)
+                    if (!dateVal.valid) {
+                      nextErrors.experienceDate = dateVal.error || 'Data inválida.'
+                    } else if (isFutureDate(nextVal)) {
+                      nextErrors.experienceDate = 'A data da experiência não pode ser futura.'
+                    } else {
+                      delete nextErrors.experienceDate
+                    }
+                  }
+                  setErrors(nextErrors)
+                }
               }}
               className={`w-full sm:w-60 px-3 py-2 text-sm rounded-md border bg-white text-slate-900 focus:outline-none focus:ring-2 transition-colors ${
                 errors.experienceDate
@@ -348,7 +376,8 @@ export default function Relatar() {
               </p>
             ) : (
               <p className="text-[11px] text-slate-500">
-                A data deve corresponder ao dia em que você foi atendido (não pode ser futura).
+                Data do atendimento presencial ou virtual (preenchimento automático com a data de
+                hoje; não pode ser futura).
               </p>
             )}
           </div>
