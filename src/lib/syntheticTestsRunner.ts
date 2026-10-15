@@ -6,12 +6,18 @@
  * - 100% isolados da rede, sem internet, sem SMTP, sem APIs externas.
  * - Sem segredos, credenciais ou conexões a bancos de dados compartilhados.
  * - Exclusivamente fixtures com prefixo E2E_SYNTH_.
- * - Valida regras de negócio do validador server-side, idempotência e calendário date-only.
- * - Pode ser executado em runtime Node/tsx/Vite ou importado programaticamente.
+ * - Valida regras de negócio do validador server-side, idempotência neutra, rate limiter e verificação de equipe.
+ * - ATENÇÃO DE GOVERNANÇA: Testes PREPARADOS NÃO EXECUTADOS contra runtime real.
  */
 
 import { validateCreateReportPayload, CreateReportRequestPayload } from './serverReportValidator'
-import { handleCreateReportEndpoint, MockDatabaseClient } from './serverReportEndpointDraft'
+import {
+  handleCreateReportEndpoint,
+  MockDatabaseClient,
+  RateLimiter,
+  StaffIdentityVerifier,
+  assertStaffAccessGate,
+} from './serverReportEndpointDraft'
 import {
   validateDateOnlyString,
   isLeapYear,
@@ -198,10 +204,10 @@ export async function runSyntheticTests(): Promise<{
   }
 
   // =========================================================================
-  // SUÍTE 3: Endpoint Serverless — Idempotência e Gravação Simulada
+  // SUÍTE 3: Endpoint Serverless — Idempotência Neutra e Rate Limiting Gate
   // =========================================================================
   {
-    const suite = 'serverReportEndpointDraft — Idempotência e Execução'
+    const suite = 'serverReportEndpointDraft — Idempotência Neutra e Gates'
     const referenceDate = new Date('2025-02-15T14:30:00.000Z')
 
     // Banco de Dados em Memória Isolado para o Teste
@@ -226,6 +232,11 @@ export async function runSyntheticTests(): Promise<{
       },
     }
 
+    // Rate Limiter Permissivo para o teste de criação
+    const mockRateLimiterPass: RateLimiter = {
+      checkLimit: async () => ({ allowed: true, remainingRequests: 10 }),
+    }
+
     const testPayload: CreateReportRequestPayload = {
       idempotencyKey: 'E2E_SYNTH_UNIQUE_KEY_999',
       clientName: 'E2E_SYNTH_Constituinte_Voluntario',
@@ -235,13 +246,25 @@ export async function runSyntheticTests(): Promise<{
       termsVersion: 'v1.0-2025',
     }
 
-    // 1º Envio -> Deve criar (201, status CREATED)
-    const firstCall = await handleCreateReportEndpoint(
+    // 1º Envio sem limiter configurado -> Gate Default-Deny deve recusar (503)
+    const callWithoutLimiter = await handleCreateReportEndpoint(
       { method: 'POST', body: testPayload },
       mockDb,
       referenceDate,
     )
-    assert(suite, 'Primeiro envio retorna status 201 Created', firstCall.status === 201)
+    assert(
+      suite,
+      'Sem limiter configurado, endpoint recusa com status 503 (default-deny)',
+      callWithoutLimiter.status === 503 && callWithoutLimiter.body.success === false,
+    )
+
+    // 2º Envio com limiter ativo e configurado -> Deve criar com 201 Created
+    const firstCall = await handleCreateReportEndpoint(
+      { method: 'POST', body: testPayload },
+      { dbClient: mockDb, rateLimiter: mockRateLimiterPass },
+      referenceDate,
+    )
+    assert(suite, 'Primeiro envio com limiter retorna status 201 Created', firstCall.status === 201)
     assert(
       suite,
       'Primeiro envio tem idempotencyStatus CREATED',
@@ -249,17 +272,14 @@ export async function runSyntheticTests(): Promise<{
     )
     assert(
       suite,
-      'Registro recebeu id sintético prefixado',
-      typeof firstCall.body.reportId === 'string' &&
-        firstCall.body.reportId.startsWith('E2E_SYNTH_'),
+      'Registro recebeu id via gerador (string não vazia)',
+      typeof firstCall.body.reportId === 'string' && firstCall.body.reportId.length > 0,
     )
 
-    const createdId = firstCall.body.reportId
-
-    // 2º Envio idêntico (mesma idempotencyKey) -> Deve reexibir sem duplicar (200, IDEMPOTENT_REPLAY)
+    // 3º Envio idêntico (mesma idempotencyKey) -> Resposta Neutra SEM vazamento de metadados
     const secondCall = await handleCreateReportEndpoint(
       { method: 'POST', body: testPayload },
-      mockDb,
+      { dbClient: mockDb, rateLimiter: mockRateLimiterPass },
       referenceDate,
     )
     assert(suite, 'Segundo envio idêntico retorna status 200 OK', secondCall.status === 200)
@@ -270,8 +290,18 @@ export async function runSyntheticTests(): Promise<{
     )
     assert(
       suite,
-      'Segundo envio retorna o mesmo reportId do primeiro',
-      secondCall.body.reportId === createdId,
+      'Resposta neutra NÃO vaza reportId a quem repete a chave',
+      secondCall.body.reportId === undefined,
+    )
+    assert(
+      suite,
+      'Resposta neutra NÃO vaza status interno do relato',
+      secondCall.body.status === undefined,
+    )
+    assert(
+      suite,
+      'Resposta neutra NÃO vaza timestamp receivedAt original',
+      secondCall.body.receivedAt === undefined,
     )
     assert(
       suite,
@@ -279,13 +309,78 @@ export async function runSyntheticTests(): Promise<{
       memoryStore.length === 1,
     )
 
-    // Envio com Método Não Permitido (GET)
+    // 4º Envio com limiter bloqueando -> Deve retornar 429
+    const mockRateLimiterBlock: RateLimiter = {
+      checkLimit: async () => ({
+        allowed: false,
+        remainingRequests: 0,
+        retryAfterSeconds: 60,
+        reason: 'Taxa máxima de submissões excedida.',
+      }),
+    }
+    const rateBlockedCall = await handleCreateReportEndpoint(
+      { method: 'POST', body: testPayload },
+      { dbClient: mockDb, rateLimiter: mockRateLimiterBlock },
+      referenceDate,
+    )
+    assert(
+      suite,
+      'Limiter acionado retorna status 429 Too Many Requests',
+      rateBlockedCall.status === 429 && rateBlockedCall.body.success === false,
+    )
+
+    // 5º Envio com Método Não Permitido (GET)
     const getCall = await handleCreateReportEndpoint(
       { method: 'GET', body: null },
-      mockDb,
+      { dbClient: mockDb, rateLimiter: mockRateLimiterPass },
       referenceDate,
     )
     assert(suite, 'Requisição GET retorna status 405 Method Not Allowed', getCall.status === 405)
+  }
+
+  // =========================================================================
+  // SUÍTE 4: Verificação de Equipe Server-Side com Gate Default-Deny
+  // =========================================================================
+  {
+    const suite = 'assertStaffAccessGate — Verificação de Equipe Server-Side'
+
+    // Cenário 1: Sem verificador fornecido -> Default-Deny estrito
+    const noVerifierRes = await assertStaffAccessGate(null, {
+      authorizationHeader: 'Bearer fake_token',
+    })
+    assert(
+      suite,
+      'Sem verificador de equipe configurado, acesso é negado (default-deny)',
+      noVerifierRes.allowed === false,
+    )
+
+    // Cenário 2: Verificador que rejeita credencial
+    const rejectingVerifier: StaffIdentityVerifier = {
+      verifyStaffMembership: async () => ({
+        isStaffMember: false,
+        errorReason: 'Token não pertence a membro ativo da equipe Ferri & Ferri.',
+      }),
+    }
+    const rejectedRes = await assertStaffAccessGate(rejectingVerifier, {
+      authorizationHeader: 'Bearer invalid_or_generic_auth',
+    })
+    assert(suite, 'Operador não-staff é rejeitado pelo verificador', rejectedRes.allowed === false)
+
+    // Cenário 3: Verificador que confirma membro da equipe
+    const approvingVerifier: StaffIdentityVerifier = {
+      verifyStaffMembership: async () => ({
+        isStaffMember: true,
+        staffUserId: 'staff_ferri_01',
+      }),
+    }
+    const approvedRes = await assertStaffAccessGate(approvingVerifier, {
+      authorizationHeader: 'Bearer valid_staff_credential',
+    })
+    assert(
+      suite,
+      'Membro comprovado da equipe é aprovado com identificador',
+      approvedRes.allowed === true && approvedRes.staffUserId === 'staff_ferri_01',
+    )
   }
 
   const passed = results.filter((r) => r.passed).length

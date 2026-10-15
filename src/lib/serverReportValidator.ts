@@ -179,14 +179,22 @@ export function validateCreateReportPayload(
 }
 
 /**
- * Resposta típica do endpoint de criação de relato quando o backend estiver ativo.
+ * Resposta do endpoint de criação de relato quando o backend estiver ativo.
+ *
+ * BLINDAGEM DE IDEMPOTÊNCIA (v0.0.11):
+ * - Em novas criações com sucesso ('CREATED'): retorna received: true, reportId (UUID v4 do relato),
+ *   status: 'Recebido', receivedAt e idempotencyStatus.
+ * - Em repetições por chave existente ('IDEMPOTENT_REPLAY'): resposta NEUTRA { received: true, success: true }
+ *   com idempotencyStatus: 'IDEMPOTENT_REPLAY', SEM reportId, SEM status interno e SEM receivedAt do relato original,
+ *   impedindo qualquer vazamento de metadados a quem reutilizar uma chave alheia.
  */
 export interface CreateReportEndpointResponse {
   success: boolean
+  received?: boolean
   reportId?: string
-  idempotencyStatus: 'CREATED' | 'IDEMPOTENT_REPLAY'
-  status: 'Recebido'
-  receivedAt: string
+  idempotencyStatus?: 'CREATED' | 'IDEMPOTENT_REPLAY'
+  status?: 'Recebido'
+  receivedAt?: string
   error?: string
   errors?: ValidationErrorDetail[]
 }

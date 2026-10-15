@@ -85,54 +85,59 @@ Para viabilizar a geração do QR code estritamente local e sem dependência de 
 
 ---
 
-## 6. Auditoria de Prontidão e Limites de Segurança (v0.0.8 / Microcorreção Inativa)
+## 6. Auditoria de Prontidão e Limites de Segurança (Atualização de Arquivos Candidatos)
 
-Esta seção documenta o estado estrito de prontidão técnica, de governança e de segurança apurado na auditoria:
+Esta seção documenta o estado estrito de prontidão técnica, de governança e de segurança dos módulos candidatos:
 
 1. **SQL PostgreSQL Genérico Não Confirmado e Não Aplicável:**
    - O arquivo `security-rules-draft.sql` (assim como `schema-draft.sql`) é SQL PostgreSQL genérico **NÃO CONFIRMADO** como compatível com Skip Cloud e **NÃO APLICÁVEL / NÃO ATIVAR** até que o motor de banco de dados e os papéis/roles reais sejam formalmente comprovados.
+   - A reescrita ou adaptação desses scripts para o motor de banco real só ocorrerá APÓS a escolha e autorização expressa do backend pelo Fabrício.
    - **NADA FOI PROVISIONADO, ATIVADO OU APLICADO**: não há banco provisionado, nem migração executada, nem conexão aberta.
 
 2. **Limites do Motor de Banco de Dados (BYPASSRLS / Owner / Service Role):**
    - Políticas de RLS em PostgreSQL padrão **NÃO BLOQUEIAM** superusuários de banco, o proprietário da tabela (*table owner*) ou conexões com atributo `BYPASSRLS` / conexões administrativas de serviço (*service_role*).
    - O rascunho de segurança **NÃO promete nem garante** bloqueio a esses níveis administrativos. Esses limites devem ser verificados e isolados na configuração do cluster e do provedor quando e se houver infraestrutura homologada.
 
-3. **Equipe Ainda Sem Acesso Implementado / `auth.role()` NÃO é Verificação de Staff:**
-   - A cláusula candidata anterior `auth.role() = 'authenticated'` autorizaria indistintamente **qualquer usuário autenticado**, não comprovando pertinência à equipe do escritório.
-   - Como não há mecanismo de equipe comprovado (claims JWT assinados, catálogo interno de operadores ou RBAC), **todas as policies de leitura, inserção, atualização e exclusão foram configuradas como FAIL-CLOSED (`USING (FALSE)` / `WITH CHECK (FALSE)`)**.
-   - Nenhuma policy permissiva residual foi mantida, eliminando brechas decorrentes do operador lógico `OR` que o PostgreSQL emprega entre múltiplas políticas permissivas.
+3. **Acesso da Equipe Validado no Servidor (IMPLEMENTADO EM RASCUNHO, INATIVO, NÃO TESTADO contra runtime real):**
+   - Substituição do padrão `auth.role() = 'authenticated'` (que autorizaria qualquer usuário autenticado indistintamente) por verificação server-side desacoplada via interface `StaffIdentityVerifier` e gate `assertStaffAccessGate` (`src/lib/serverReportEndpointDraft.ts`).
+   - Política estrita de **DEFAULT-DENY**: na ausência de verificador configurado, o servidor NEGA o acesso por padrão. Nenhum papel, claim ou domínio de e-mail foi hardcoded.
+   - Nas policies RLS em repouso (`security-rules-draft.sql`), todas as regras continuam configuradas como fail-closed (`USING (FALSE)` / `WITH CHECK (FALSE)`).
 
-4. **Rate-Limit NÃO Implementado no Endpoint:**
-   - O controle de taxa (*rate-limit*) **NÃO ESTÁ IMPLEMENTADO** em runtime. Existe unicamente como comentário arquitetural descritivo no arquivo de rascunho `src/lib/serverReportEndpointDraft.ts`.
+4. **Rate Limiter Efetivo com Gate Default-Deny (IMPLEMENTADO EM RASCUNHO, INATIVO, NÃO TESTADO contra runtime real):**
+   - Interface injetável `RateLimiter` integrada diretamente no endpoint candidato (`src/lib/serverReportEndpointDraft.ts`).
+   - Política mandatória de **DEFAULT-DENY**: se nenhum limiter for fornecido/configurado, o endpoint RECUSA imediatamente a requisição (status 503 com mensagem de recusa segura), nunca processando sem proteção. Sem chamadas de rede externas e sem estado global em runtime.
 
-5. **Adapter e Endpoint São Mocks Puros:**
-   - O endpoint e a camada de persistência demonstrativa utilizam a classe em memória `MockDatabaseClient` (`src/lib/serverReportEndpointDraft.ts`), sem qualquer conexão a bancos reais ou drivers de rede.
+5. **Resposta Idempotente Neutra e Blindagem contra Vazamento de Metadados (IMPLEMENTADO EM RASCUNHO, INATIVO, NÃO TESTADO contra runtime real):**
+   - O endpoint candidato (`src/lib/serverReportEndpointDraft.ts`) reformulado para resposta neutra em caso de repetição de chave (`IDEMPOTENT_REPLAY`): retorna apenas `{ success: true, received: true, idempotencyStatus: 'IDEMPOTENT_REPLAY' }`.
+   - **NÃO RETORNA** `reportId`, status interno nem `receivedAt` do relato original, impedindo qualquer vazamento de metadados a quem reutilizar chave de idempotência alheia, enquanto preserva a integridade de gravação única no banco.
 
-6. **Idempotência Atual Expõe Metadados a Chaves Reutilizadas:**
-   - A implementação atual de validação de duplicidade na classe `MockDatabaseClient` retorna os metadados do relato já existente (`reportId`, `status`, `receivedAt`) a qualquer cliente que submeta a mesma `idempotency_key`.
-   - Essa abordagem **EXPÕE** dados a quem reusa uma chave alheia e está **PENDENTE DE BLINDAGEM** antes de qualquer uso produtivo.
+6. **Identificador de Registro via Gerador Injetável (IMPLEMENTADO EM RASCUNHO, INATIVO, NÃO TESTADO contra runtime real):**
+   - Substituição de `Math.random()` por gerador injetável de IDs (`idGenerator`), com padrão `generateDefaultReportId()` que utiliza `crypto.randomUUID()` quando disponível (ou fallback criptograficamente seguro via `crypto.getRandomValues`), em estrita conformidade com o identificador primário UUID do schema (`reports.id UUID`).
 
-7. **21 Testes Sintéticos Preparados e NÃO Executados:**
-   - Os 21 casos de teste sintéticos estruturados no módulo `src/lib/syntheticTestsRunner.ts` foram **PREPARADOS** para aferição da lógica de validação em memória, mas **NÃO FORAM EXECUTADOS** nesta rodada de microcorreção inativa.
-   - **Nenhum teste foi executado contra banco de dados real.**
+7. **Adapter e Endpoint Continuam Mocks Puros:**
+   - O endpoint e a camada de persistência demonstrativa utilizam a interface em memória `MockDatabaseClient` (`src/lib/serverReportEndpointDraft.ts`), sem qualquer conexão a bancos reais, sem SDK de banco, sem Supabase e sem Skip Cloud.
 
-8. **Ausência de Integração e Bloqueio de Publicação / QR de Placa:**
-   - **NÃO declarar integração pronta.** Nenhuma integração com serviços externos ou nuvem existe.
+8. **21 Testes Sintéticos PREPARADOS NÃO EXECUTADOS contra runtime real:**
+   - Os testes estruturados no módulo `src/lib/syntheticTestsRunner.ts` (cobrindo calendário, validação, gates de rate limiter, idempotência neutra e verificação de equipe) seguem **PREPARADOS E NÃO EXECUTADOS contra runtime real ou banco de dados externo**.
+   - Toda validação realizada nesta rodada é restrita ao QA estático do projeto.
+
+9. **Ausência de Integração e Bloqueio de Publicação / QR de Placa:**
+   - **NÃO declarar integração pronta.** Nenhuma integração com serviços externos ou nuvem existe. O sistema NÃO está apto a dados reais.
    - Nenhuma publicação, deploy, configuração de DNS ou impressão/distribuição de QR code de placa está autorizada. O QR code demonstrativo da aplicação permanece restrito à visualização local sem destino público homologado.
 
 ---
 
-## 7. Próximos Passos Seguros (Planejamento da Próxima Rodada — NÃO Implementado Nesta Rodada)
+## 7. Próximos Passos Seguros (Condicionados à Decisão de Backend pelo Fabrício)
 
-Para futura rodada que venha a tratar da camada de backend e resiliência (sujeita a prévia autorização e sem código novo adicionado nesta rodada):
+Para futura rodada após a escolha formal e autorização do backend pelo Fabrício:
 
-1. **Blindagem de Idempotência contra Vazamento de Metadados:**
-   - Reformular a resposta de chave duplicada para que ela **NÃO revele** metadados de relato (`reportId`, status ou data de recepção) a quem submeter uma chave preexistente pertencente a outro remetente.
-   - Avaliar emissão de resposta canônica neutra de aceitação sem eco de detalhes internos, ou vinculação criptográfica da chave de idempotência ao remetente/sessão legítima.
+1. **Definição de Motor e Infraestrutura:**
+   - Escolha do provedor de banco de dados e runtime serverless/edge.
+   - Adaptação dos scripts SQL (`schema-draft.sql` e `security-rules-draft.sql`) para as peculiaridades do motor homologado.
 
-2. **Rate Limiter Injetado com Default-Deny:**
-   - Especificar componente de controle de taxa (*rate limiter*) desacoplado, com mecanismo de bloqueio preventivo (*default-deny*), permitindo configuração de teto de requisições por janela temporal antes do processamento de carga.
-   - Operar via gate configurável em memória para testes sintéticos, sem dependência de serviços externos de rede nesta fase.
+2. **Implementação Concreta de Adaptadores:**
+   - Implementação de instância concreta de `RateLimiter` (ex.: Redis/Upstash ou KV em borda).
+   - Implementação de instância concreta de `StaffIdentityVerifier` integrada ao catálogo de operadores e provedor de autenticação com 2FA do escritório.
 
 ---
 
