@@ -85,63 +85,87 @@ Para viabilizar a geração do QR code estritamente local e sem dependência de 
 
 ---
 
-## 6. Auditoria de Prontidão e Limites de Segurança (Atualização de Arquivos Candidatos)
+## 6. Auditoria de Prontidão e Limites de Segurança (Consolidação das 4 Correções Internas)
 
-Esta seção documenta o estado estrito de prontidão técnica, de governança e de segurança dos módulos candidatos:
+Esta seção documenta o estado estrito de prontidão técnica, de governança e de segurança dos módulos candidatos após a rodada consolidada de correções internas:
 
-1. **SQL PostgreSQL Genérico Não Confirmado e Não Aplicável:**
-   - O arquivo `security-rules-draft.sql` (assim como `schema-draft.sql`) é SQL PostgreSQL genérico **NÃO CONFIRMADO** como compatível com Skip Cloud e **NÃO APLICÁVEL / NÃO ATIVAR** até que o motor de banco de dados e os papéis/roles reais sejam formalmente comprovados.
-   - A reescrita ou adaptação desses scripts para o motor de banco real só ocorrerá APÓS a escolha e autorização expressa do backend pelo Fabrício.
-   - **NADA FOI PROVISIONADO, ATIVADO OU APLICADO**: não há banco provisionado, nem migração executada, nem conexão aberta.
+1. **Idempotência Canônica sem Metadados:**
+   - Aceite inicial e replay por chave repetida devolvem rigorosamente o **MESMO status HTTP (201 Created)** e o **MESMO corpo público canônico**: `{ success: true, received: true }`.
+   - Removida toda flag de replay (`idempotencyStatus: 'IDEMPOTENT_REPLAY'`), sem `reportId`, sem estado interno e sem `receivedAt`/data no corpo público.
+   - Tratamento seguro de colisão atômica concorrente (ex.: violação de constraint única em inserção paralela com a mesma chave) devolvendo o mesmo corpo canônico idêntico, prevenindo vazamento de temporização e de metadados.
 
-2. **Limites do Motor de Banco de Dados (BYPASSRLS / Owner / Service Role):**
-   - Políticas de RLS em PostgreSQL padrão **NÃO BLOQUEIAM** superusuários de banco, o proprietário da tabela (*table owner*) ou conexões com atributo `BYPASSRLS` / conexões administrativas de serviço (*service_role*).
-   - O rascunho de segurança **NÃO promete nem garante** bloqueio a esses níveis administrativos. Esses limites devem ser verificados e isolados na configuração do cluster e do provedor quando e se houver infraestrutura homologada.
+2. **Rate Limiter com Default-Deny Efetivo e Erro Constante:**
+   - Limiter AUSENTE (`null`/`undefined`), que LANÇA exceção ou que retorna valor MALFORMADO (objeto inválido, sem campo boolean `allowed` ou `allowed !== true`) é sumariamente **NEGADO ANTES de qualquer escrita/insert no banco**.
+   - Erro público **CONSTANTE** (`{ success: false, error: 'rate_limited' }`, status 429), sem expor `reason`, contadores ou qualquer detalhe interno de infraestrutura.
 
-3. **Acesso da Equipe Validado no Servidor (IMPLEMENTADO EM RASCUNHO, INATIVO, NÃO TESTADO contra runtime real):**
-   - Substituição do padrão `auth.role() = 'authenticated'` (que autorizaria qualquer usuário autenticado indistintamente) por verificação server-side desacoplada via interface `StaffIdentityVerifier` e gate `assertStaffAccessGate` (`src/lib/serverReportEndpointDraft.ts`).
-   - Política estrita de **DEFAULT-DENY**: na ausência de verificador configurado, o servidor NEGA o acesso por padrão. Nenhum papel, claim ou domínio de e-mail foi hardcoded.
-   - Nas policies RLS em repouso (`security-rules-draft.sql`), todas as regras continuam configuradas como fail-closed (`USING (FALSE)` / `WITH CHECK (FALSE)`).
+3. **Gate de Equipe (Staff) com Identidade Comprovada Não-Vazia:**
+   - Verificador de equipe com default-deny estrito: nega exceções (fail-closed) e retornos malformados com erro constante `access_denied`.
+   - **Exigência mandatória de identidade comprovada NÃO-VAZIA**: `"authenticated"` genérico, strings em branco e meros domínios de e-mail (ex.: `@ferriferriadv.com.br`) ou endereços de e-mail puros **NÃO BASTAM** e são sumariamente recusados como prova de staff. Exige identificador de membro auditável.
 
-4. **Rate Limiter Efetivo com Gate Default-Deny (IMPLEMENTADO EM RASCUNHO, INATIVO, NÃO TESTADO contra runtime real):**
-   - Interface injetável `RateLimiter` integrada diretamente no endpoint candidato (`src/lib/serverReportEndpointDraft.ts`).
-   - Política mandatória de **DEFAULT-DENY**: se nenhum limiter for fornecido/configurado, o endpoint RECUSA imediatamente a requisição (status 503 com mensagem de recusa segura), nunca processando sem proteção. Sem chamadas de rede externas e sem estado global em runtime.
+4. **UUID Validado Idêntico ao Persistido e Rejeição de Espaços:**
+   - O valor UUID validado pelo validador RFC 4122 v4 é **EXATAMENTE o mesmo persistido no insert** (garantia de variável única validada, sem recriação ou substituição posterior).
+   - Rejeição estrita de qualquer espaço: se contiver espaço em qualquer posição (início, meio ou fim), o valor é **INVÁLIDO** (sem trim permissivo seguido de persistência de valor não-sanitizado).
+   - Preservação da política **fail-closed** quando a Web Crypto API estiver indisponível (lança erro explícito, zero fallback constante).
 
-5. **Resposta Idempotente Neutra e Blindagem contra Vazamento de Metadados (IMPLEMENTADO EM RASCUNHO, INATIVO, NÃO TESTADO contra runtime real):**
-   - O endpoint candidato (`src/lib/serverReportEndpointDraft.ts`) reformulado para resposta neutra em caso de repetição de chave (`IDEMPOTENT_REPLAY`): retorna apenas `{ success: true, received: true, idempotencyStatus: 'IDEMPOTENT_REPLAY' }`.
-   - **NÃO RETORNA** `reportId`, status interno nem `receivedAt` do relato original, impedindo qualquer vazamento de metadados a quem reutilizar chave de idempotência alheia, enquanto preserva a integridade de gravação única no banco.
+5. **SQL PostgreSQL Genérico Arquivado (NÃO APLICÁVEL ao Motor Real):**
+   - Os arquivos SQL legados (`schema-draft.sql` e `security-rules-draft.sql`) representam SQL PostgreSQL genérico arquivado **NÃO COMPATÍVEL / NÃO APLICÁVEL** ao motor real da plataforma Skip Cloud (que adota SQLite dedicado por projeto).
+   - **Nenhum novo SQL PostgreSQL genérico foi gerado**. Nenhuma migração ou função de banco foi criada ou aplicada.
 
-6. **Identificador de Registro via Gerador Injetável Fail-Closed (IMPLEMENTADO EM RASCUNHO, INATIVO, NÃO TESTADO contra runtime real):**
-   - **Remoção do Fallback Constante Inseguro:** O antigo fallback de UUID fixo (`00000000-0000-4000-8000-000000000000`) foi completamente removido de `generateDefaultReportId()`.
-   - **Política Fail-Closed:** Se a Web Crypto API (`crypto.randomUUID()` e `crypto.getRandomValues`) não estiver disponível ou falhar, a função LANÇA ERRO explícito, nunca retornando valor constante ou vazio.
-   - **Tratamento Seguro no Endpoint e Validação Pré-Insert:** O handler captura qualquer exceção do gerador e valida rigorosamente a saída via regex RFC 4122 v4 (`isValidReportId()`), rejeitando strings vazias, o UUID constante legado e formatos inválidos.
-   - Em caso de qualquer falha na geração ou validação do ID, o endpoint devolve resposta pública constante de erro (`{ success: false, error: 'internal_error' }`) com status 500, sem vazar detalhes técnicos ou stack traces, e com garantia de **ZERO inserts** no banco.
+6. **Adapter e Endpoint Continuam Mocks Puros em Memória:**
+   - O endpoint e a camada de persistência utilizam a interface em memória `MockDatabaseClient` (`src/lib/serverReportEndpointDraft.ts`), sem qualquer conexão a bancos reais, sem SDK de banco, sem Supabase e sem Skip Cloud.
 
-7. **Adapter e Endpoint Continuam Mocks Puros:**
-   - O endpoint e a camada de persistência demonstrativa utilizam a interface em memória `MockDatabaseClient` (`src/lib/serverReportEndpointDraft.ts`), sem qualquer conexão a bancos reais, sem SDK de banco, sem Supabase e sem Skip Cloud.
+7. **Testes Sintéticos: Distinção Explícita de Executados vs. Preparados:**
+   - **EXECUTADOS:** Apenas o pipeline estático da plataforma (`oxlint`, `tsc`, `vite build`).
+   - **PREPARADOS / NÃO EXECUTADOS:** A suíte de testes sintéticos unitários em memória (`src/lib/syntheticTestsRunner.ts`), disponibilizada integralmente em código auditável e independente de rede, cobrindo todos os caminhos das 4 correções.
 
-8. **Testes Sintéticos PREPARADOS NÃO EXECUTADOS contra runtime real:**
-   - Os testes estruturados no módulo `src/lib/syntheticTestsRunner.ts` foram expandidos para cobrir os cenários de geração de ID: (a) crypto ausente simulado; (b) gerador injetado lançando exceção; (c) gerador injetado retornando saída inválida (vazia, constante antigo, formato errado); e (d) gerador seguro operando normalmente.
-   - Todos os testes seguem **PREPARADOS E NÃO EXECUTADOS contra runtime real ou banco de dados externo**.
-   - Toda validação realizada nesta rodada é restrita ao QA estático do projeto.
-
-9. **Ausência de Integração e Bloqueio de Publicação / QR de Placa:**
+8. **Ausência de Integração e Bloqueio de Publicação / QR de Placa:**
    - **NÃO declarar integração pronta.** Nenhuma integração com serviços externos ou nuvem existe. O sistema NÃO está apto a dados reais.
    - Nenhuma publicação, deploy, configuração de DNS ou impressão/distribuição de QR code de placa está autorizada. O QR code demonstrativo da aplicação permanece restrito à visualização local sem destino público homologado.
 
 ---
 
-## 7. Próximos Passos Seguros (Condicionados à Decisão de Backend pelo Fabrício)
+## 7. Checklist Único e Objetivo do Caminho Nativo (Pós-Ativação do Backend)
 
-Para futura rodada após a escolha formal e autorização do backend pelo Fabrício:
+> **AVISO DE GATE EXTERNO:** Este checklist descreve as etapas técnicas sequenciais que **SÓ PODEM OCORRER APÓS** a confirmação do botão "Ativar Skip Cloud" pelo Fabrício. Atualmente, o projeto permanece 100% frontend estático em memória.
 
-1. **Definição de Motor e Infraestrutura:**
-   - Escolha do provedor de banco de dados e runtime serverless/edge.
-   - Adaptação dos scripts SQL (`schema-draft.sql` e `security-rules-draft.sql`) para as peculiaridades do motor homologado.
+### Referência Oficial da Plataforma
+- **Fonte Oficial:** Documentação oficial do Skip Cloud / Skip Developer Platform (`https://docs.skip.tools/` e especificações de backend nativo).
+- **Arquitetura Oficial:**
+  - **Motor de Banco de Dados:** SQLite dedicado por projeto (com isolamento estrito por sandbox de processo e volume persistente dedicado; NÃO é PostgreSQL compartilhado).
+  - **Runtime de Endpoints:** JavaScript/TypeScript restrito em rota nativa montada em `/backend/v1/...` (runtime seguro com Web Crypto nativo, sem Node modules arbitrários).
+  - **Autenticação:** Sistema nativo de contas com e-mail/senha integrado e emissão de tokens de sessão isolados por projeto.
+  - **Isolamento e Custos:** Isolamento integral por projeto (id `9d1a62e7-f60e-4585-aecf-107d6a652a9d`), sem compartilhamento de dados com ProvaSocial Médica ou terceiros, sem custos ocultos ou cobranças não contratadas.
 
-2. **Implementação Concreta de Adaptadores:**
-   - Implementação de instância concreta de `RateLimiter` (ex.: Redis/Upstash ou KV em borda).
-   - Implementação de instância concreta de `StaffIdentityVerifier` integrada ao catálogo de operadores e provedor de autenticação com 2FA do escritório.
+### Checklist de Implementação Sequencial:
+- [ ] **1. Confirmação do Gate Externo na UI:** Obter resposta e autorização expressa do Fabrício para pressionar o botão "Ativar Skip Cloud".
+- [ ] **2. Criação das Migrations SQLite Nativas:**
+  - Criar arquivos de migração SQLite em formato nativo da plataforma, substituindo o SQL PostgreSQL genérico arquivado (`schema-draft.sql`).
+  - Definir tabela `reports` com tipos SQLite (`TEXT PRIMARY KEY`, `TEXT UNIQUE` para idempotency_key, `CHECK` constraints equivalentes para teto de 80/2000 chars e consentimento).
+  - Definir tabelas de auditoria e deliberações com chaves estrangeiras SQLite e índices dedicados.
+- [ ] **3. Regras de Acesso Reescritas para o Motor Real:**
+  - Substituir policies RLS do PostgreSQL por regras de acesso nativas do runtime SQLite/Skip Cloud, com garantia de bloqueio de leitura pública.
+- [ ] **4. Endpoint Real em `/backend/v1/reports`:**
+  - Transpor a lógica de `serverReportEndpointDraft.ts` para o handler nativo em rota oficial `/backend/v1/reports`.
+  - Conectar ao cliente de banco nativo SQLite via transação atômica (`INSERT ... ON CONFLICT DO NOTHING`).
+  - Configurar rate limiting nativo baseado no identificador do cliente.
+- [ ] **5. Autenticação e Prova de Staff da Equipe:**
+  - Configurar autenticação nativa de e-mail/senha para operadores do Ferri & Ferri.
+  - Implementar verificação de associação comprovada de staff (tabela de membros de equipe com ID interno, não mero e-mail ou `role='authenticated'`).
+- [ ] **6. Bateria de Testes de Negação de Acesso Público:**
+  - Executar testes automatizados verificando negação (401/403) em requisições anônimas aos endpoints de auditoria, painel e deliberações.
+  - Verificar rejeição de credenciais não pertencentes à equipe.
+- [ ] **7. Teste de Envio Sintético Gravado e Relido:**
+  - Executar envio de relato sintético via endpoint nativo;
+  - Verificar retorno com status 201 e corpo `{ success: true, received: true }`;
+  - Verificar inserção única na tabela SQLite;
+  - Reenviar relato com mesma chave de idempotência e validar status 201 idêntico sem duplicação de linha;
+  - Efetuar releitura autenticada da linha gravada via sessão de staff.
+- [ ] **8. Consulta Restrita Autenticada no Painel Interno:**
+  - Conectar o painel interno (`/painel`) ao endpoint restrito `/backend/v1/reports` utilizando token de sessão de staff autenticado.
+- [ ] **9. Confirmação de URL HTTPS Estável antes do QR da Placa:**
+  - Homologar domínio próprio oficial do escritório com certificado SSL/HTTPS ativo.
+  - Obter validação formal por escrito do Fabrício quanto à estabilidade e perenidade da URL de coleta.
+  - Somente após essa confirmação expressa, gerar e liberar a arte/QR Code definitivo para impressão de placas físicas ou materiais do escritório.
 
 ---
 

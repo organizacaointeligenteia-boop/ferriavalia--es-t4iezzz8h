@@ -79,15 +79,17 @@ export const LEGACY_FALLBACK_UUID = '00000000-0000-4000-8000-000000000000'
 
 /**
  * Validador de integridade para IDs gerados (injetados ou padrão).
- * Rejeita nulos, strings vazias, o UUID constante do fallback antigo e qualquer valor
- * que não esteja no formato RFC 4122 v4 plausível.
+ * Rejeita nulos, strings vazias, qualquer valor contendo espaços (sem trim permissivo:
+ * se contiver espaço em qualquer posição, início, fim ou meio, é inválido), o UUID constante
+ * do fallback antigo e qualquer valor fora do formato RFC 4122 v4 estrito.
  */
 export function isValidReportId(id: unknown): id is string {
   if (typeof id !== 'string') return false
-  const trimmed = id.trim()
-  if (trimmed.length === 0) return false
-  if (trimmed.toLowerCase() === LEGACY_FALLBACK_UUID.toLowerCase()) return false
-  return UUID_V4_REGEX.test(trimmed)
+  // Rejeição estrita de qualquer espaço (sem validar com trim e persistir original)
+  if (/\s/.test(id)) return false
+  if (id.length === 0) return false
+  if (id.toLowerCase() === LEGACY_FALLBACK_UUID.toLowerCase()) return false
+  return UUID_V4_REGEX.test(id)
 }
 
 /**
@@ -127,6 +129,16 @@ export interface MockDatabaseClient {
     status: 'Recebido'
     receivedAt: string
   }) => Promise<{ id: string }>
+}
+
+/**
+ * Erro de conflito de chave única de idempotência simulado em concorrência.
+ */
+export class IdempotencyConflictError extends Error {
+  constructor(message = 'Conflito de unicidade de chave de idempotência') {
+    super(message)
+    this.name = 'IdempotencyConflictError'
+  }
 }
 
 export interface CreateReportEndpointDependencies {
@@ -180,14 +192,14 @@ export async function handleCreateReportEndpoint(
   }
 
   // 2. Rate Limiting EFETIVO com Gate DEFAULT-DENY
-  // Se nenhum rateLimiter for configurado/injetado, RECUSAR a requisição por padrão de segurança
-  if (!rateLimiter) {
+  // Limiter AUSENTE, que LANÇA exceção ou que retorna valor MALFORMADO deve NEGAR
+  // ANTES de qualquer escrita/insert; erro público CONSTANTE, sem expor reason/detalhe interno.
+  if (!rateLimiter || typeof rateLimiter.checkLimit !== 'function') {
     return {
-      status: 503,
+      status: 429,
       body: {
         success: false,
-        error:
-          'Proteção contra abuso não configurada. Requisição recusada por política default-deny.',
+        error: 'rate_limited',
       },
     }
   }
@@ -198,13 +210,30 @@ export async function handleCreateReportEndpoint(
     request.headers?.['client-ip'] ||
     'anonymous_client'
 
-  const rateCheck = await rateLimiter.checkLimit(clientIdentifier)
-  if (!rateCheck.allowed) {
+  try {
+    const rateCheck = await rateLimiter.checkLimit(clientIdentifier)
+    // Validação estrita do retorno: deve ser objeto não-nulo com propriedade boolean 'allowed' === true
+    if (
+      !rateCheck ||
+      typeof rateCheck !== 'object' ||
+      typeof rateCheck.allowed !== 'boolean' ||
+      rateCheck.allowed !== true
+    ) {
+      return {
+        status: 429,
+        body: {
+          success: false,
+          error: 'rate_limited',
+        },
+      }
+    }
+  } catch {
+    // Se o rate limiter lançar qualquer exceção, nega por segurança sem vazar erro interno
     return {
       status: 429,
       body: {
         success: false,
-        error: rateCheck.reason || 'Limite de requisições excedido. Tente novamente mais tarde.',
+        error: 'rate_limited',
       },
     }
   }
@@ -224,24 +253,26 @@ export async function handleCreateReportEndpoint(
 
   const payload = validation.sanitizedPayload
 
-  // 4. Verificação de Idempotência (deduplicação) com RESPOSTA NEUTRA
-  // Não retornar reportId, status interno nem receivedAt do relato original para não vazar metadados
+  // 4. Verificação de Idempotência (deduplicação) com CONTRATO ATÔMICO E CANÔNICO
+  // Tanto no aceite inicial quanto em replay, retorna o MESMO status (201) e MESMO corpo público canônico:
+  // { success: true, received: true }. Sem flag de replay, sem reportId, sem estado interno, sem data/receivedAt.
   const existingReport = await dbClient.findReportByIdempotencyKey(payload.idempotencyKey)
   if (existingReport) {
     return {
-      status: 200,
+      status: 201,
       body: {
         success: true,
         received: true,
-        idempotencyStatus: 'IDEMPOTENT_REPLAY',
       },
     }
   }
 
   // 5. Geração Segura e Validação de ID ANTES da Inserção
-  // Captura qualquer falha do idGenerator (exceção ou valor inválido)
-  // Devolve erro público constante "internal_error", sem vazar stack ou detalhes internos
-  let reportId: string
+  // Captura qualquer falha do idGenerator (exceção ou valor inválido).
+  // O UUID validado DEVE SER EXATAMENTE O MESMO usado no insert: validamos `validatedId`
+  // e persistimos EXATAMENTE essa variável `validatedId` (sem trim posterior, sem outra variável).
+  // Devolve erro público constante "internal_error", sem vazar stack ou detalhes internos.
+  let validatedId: string
   try {
     const generated = idGenerator()
     if (!isValidReportId(generated)) {
@@ -253,7 +284,7 @@ export async function handleCreateReportEndpoint(
         },
       }
     }
-    reportId = generated
+    validatedId = generated
   } catch {
     return {
       status: 500,
@@ -266,27 +297,55 @@ export async function handleCreateReportEndpoint(
 
   const nowBR = formatDateTimeBRSaoPaulo(referenceNow)
 
-  const inserted = await dbClient.insertReport({
-    id: reportId,
-    idempotencyKey: payload.idempotencyKey,
-    clientName: payload.clientName,
-    relato: payload.relato,
-    experienceDate: payload.experienceDate,
-    consentGiven: payload.consentGiven,
-    termsVersion: payload.termsVersion,
-    status: 'Recebido',
-    receivedAt: nowBR,
-  })
+  try {
+    await dbClient.insertReport({
+      id: validatedId, // EXATAMENTE o UUID validado
+      idempotencyKey: payload.idempotencyKey,
+      clientName: payload.clientName,
+      relato: payload.relato,
+      experienceDate: payload.experienceDate,
+      consentGiven: payload.consentGiven,
+      termsVersion: payload.termsVersion,
+      status: 'Recebido',
+      receivedAt: nowBR,
+    })
+  } catch (err: unknown) {
+    // Tratar conflito concorrente de chave de idempotência (ex: inserção paralela com a mesma chave)
+    // Devolve o mesmo corpo público canônico idêntico (status 201, { success: true, received: true })
+    const isConflict =
+      err instanceof IdempotencyConflictError ||
+      (typeof err === 'object' &&
+        err !== null &&
+        (('code' in err && (err as { code?: unknown }).code === '23505') ||
+          ('name' in err && (err as { name?: unknown }).name === 'IdempotencyConflictError') ||
+          ('message' in err &&
+            typeof (err as { message?: unknown }).message === 'string' &&
+            /(idempotency|unique|conflito|duplicate)/i.test((err as { message: string }).message))))
+
+    if (isConflict) {
+      return {
+        status: 201,
+        body: {
+          success: true,
+          received: true,
+        },
+      }
+    }
+
+    return {
+      status: 500,
+      body: {
+        success: false,
+        error: 'internal_error',
+      },
+    }
+  }
 
   return {
     status: 201,
     body: {
       success: true,
       received: true,
-      reportId: inserted.id,
-      idempotencyStatus: 'CREATED',
-      status: 'Recebido',
-      receivedAt: nowBR,
     },
   }
 }
@@ -302,24 +361,83 @@ export async function assertStaffAccessGate(
     clientContext?: Record<string, unknown>
   },
 ): Promise<{ allowed: boolean; staffUserId?: string; reason?: string }> {
-  if (!verifier) {
+  // 1. Verificador ausente -> default-deny estrito com negação antes de qualquer operação
+  if (!verifier || typeof verifier.verifyStaffMembership !== 'function') {
     return {
       allowed: false,
-      reason:
-        'Mecanismo de verificação de equipe não configurado no servidor. Acesso negado por default-deny.',
+      reason: 'access_denied',
     }
   }
 
-  const check = await verifier.verifyStaffMembership(credentials)
+  // 2. Proteção contra exceções lançadas pelo verificador (fail-closed)
+  let check: {
+    isStaffMember: boolean
+    staffUserId?: string
+    errorReason?: string
+  }
+  try {
+    const rawCheck = await verifier.verifyStaffMembership(credentials)
+    // 3. Rejeitar retornos malformados / inválidos (objeto nulo, não-objeto, isStaffMember não-boolean)
+    if (!rawCheck || typeof rawCheck !== 'object' || typeof rawCheck.isStaffMember !== 'boolean') {
+      return {
+        allowed: false,
+        reason: 'access_denied',
+      }
+    }
+    check = rawCheck
+  } catch {
+    return {
+      allowed: false,
+      reason: 'access_denied',
+    }
+  }
+
   if (!check.isStaffMember) {
     return {
       allowed: false,
-      reason: check.errorReason || 'Acesso negado: operador não é membro verificado da equipe.',
+      reason: 'access_denied',
+    }
+  }
+
+  // 4. EXIGIR identidade de equipe comprovada NÃO VAZIA.
+  // "authenticated" genérico ou domínio de e-mail NÃO bastam como prova de staff.
+  // Rejeita undefined, null, string vazia, string só com espaços, "authenticated" genérico
+  // e strings no formato de e-mail / domínio de e-mail.
+  const rawId = check.staffUserId
+  if (typeof rawId !== 'string') {
+    return {
+      allowed: false,
+      reason: 'access_denied',
+    }
+  }
+
+  const trimmedId = rawId.trim()
+  if (trimmedId.length === 0) {
+    return {
+      allowed: false,
+      reason: 'access_denied',
+    }
+  }
+
+  // Rejeitar papéis genéricos que não constituem identidade comprovada
+  if (trimmedId.toLowerCase() === 'authenticated' || trimmedId.toLowerCase() === 'user') {
+    return {
+      allowed: false,
+      reason: 'access_denied',
+    }
+  }
+
+  // Rejeitar mera indicação de domínio de e-mail ou endereço de e-mail puro como prova de staff
+  // ("@ferriferriadv.com.br", "user@ferriferriadv.com.br")
+  if (trimmedId.includes('@')) {
+    return {
+      allowed: false,
+      reason: 'access_denied',
     }
   }
 
   return {
     allowed: true,
-    staffUserId: check.staffUserId,
+    staffUserId: trimmedId,
   }
 }

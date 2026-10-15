@@ -21,6 +21,7 @@ import {
   isValidReportId,
   LEGACY_FALLBACK_UUID,
   UUID_V4_REGEX,
+  IdempotencyConflictError,
 } from './serverReportEndpointDraft'
 import {
   validateDateOnlyString,
@@ -208,10 +209,10 @@ export async function runSyntheticTests(): Promise<{
   }
 
   // =========================================================================
-  // SUÍTE 3: Endpoint Serverless — Idempotência Neutra e Rate Limiting Gate
+  // SUÍTE 3: Endpoint Serverless — Idempotência Canônica e Rate Limiting Robusto
   // =========================================================================
   {
-    const suite = 'serverReportEndpointDraft — Idempotência Neutra e Gates'
+    const suite = 'serverReportEndpointDraft — Idempotência e Rate Limiting'
     const referenceDate = new Date('2025-02-15T14:30:00.000Z')
 
     // Banco de Dados em Memória Isolado para o Teste
@@ -227,6 +228,10 @@ export async function runSyntheticTests(): Promise<{
         return found ? { id: found.id, receivedAt: found.receivedAt } : null
       },
       insertReport: async (data) => {
+        // Se a chave já existir no insert (simulando restrição unique do banco em concorrência), lança IdempotencyConflictError
+        if (memoryStore.some((r) => r.idempotencyKey === data.idempotencyKey)) {
+          throw new IdempotencyConflictError()
+        }
         memoryStore.push({
           id: data.id,
           idempotencyKey: data.idempotencyKey,
@@ -250,90 +255,191 @@ export async function runSyntheticTests(): Promise<{
       termsVersion: 'v1.0-2025',
     }
 
-    // 1º Envio sem limiter configurado -> Gate Default-Deny deve recusar (503)
+    // -------------------------------------------------------------
+    // TESTES DO RATE LIMITER: ausente, lança exceção ou malformado -> NEGA sem insert (429, 'rate_limited')
+    // -------------------------------------------------------------
+    let writeAttemptsOnLimiterFailure = 0
+    const mockDbAuditWrites: MockDatabaseClient = {
+      findReportByIdempotencyKey: async () => null,
+      insertReport: async (data) => {
+        writeAttemptsOnLimiterFailure++
+        return { id: data.id }
+      },
+    }
+
+    // 1. Limiter AUSENTE (undefined/null) -> recusa 429 'rate_limited' ANTES de qualquer escrita
     const callWithoutLimiter = await handleCreateReportEndpoint(
       { method: 'POST', body: testPayload },
-      mockDb,
+      { dbClient: mockDbAuditWrites, rateLimiter: null },
       referenceDate,
     )
     assert(
       suite,
-      'Sem limiter configurado, endpoint recusa com status 503 (default-deny)',
-      callWithoutLimiter.status === 503 && callWithoutLimiter.body.success === false,
+      'Rate limiter AUSENTE: recusa com status 429 e erro constante rate_limited',
+      callWithoutLimiter.status === 429 && callWithoutLimiter.body.error === 'rate_limited',
+    )
+    assert(
+      suite,
+      'Rate limiter AUSENTE: ZERO inserts tentados',
+      writeAttemptsOnLimiterFailure === 0,
     )
 
-    // 2º Envio com limiter ativo e configurado -> Deve criar com 201 Created
+    // 2. Limiter que LANÇA exceção -> recusa 429 'rate_limited' sem insert
+    const mockRateLimiterThrows: RateLimiter = {
+      checkLimit: async () => {
+        throw new Error('Falha de conexão com Redis ou cluster de rate limiting')
+      },
+    }
+    const callLimiterThrows = await handleCreateReportEndpoint(
+      { method: 'POST', body: testPayload },
+      { dbClient: mockDbAuditWrites, rateLimiter: mockRateLimiterThrows },
+      referenceDate,
+    )
+    assert(
+      suite,
+      'Rate limiter que LANÇA exceção: recusa com 429 e erro constante rate_limited sem vazar stack',
+      callLimiterThrows.status === 429 && callLimiterThrows.body.error === 'rate_limited',
+    )
+    assert(
+      suite,
+      'Rate limiter com exceção: ZERO inserts tentados',
+      writeAttemptsOnLimiterFailure === 0,
+    )
+
+    // 3. Limiter que retorna MALFORMADO (objeto nulo, sem boolean allowed ou tipo inválido)
+    const mockRateLimiterMalformedA = {
+      checkLimit: async () => null as unknown as { allowed: boolean },
+    }
+    const callLimiterMalformedA = await handleCreateReportEndpoint(
+      { method: 'POST', body: testPayload },
+      { dbClient: mockDbAuditWrites, rateLimiter: mockRateLimiterMalformedA },
+      referenceDate,
+    )
+    assert(
+      suite,
+      'Rate limiter malformado (retorna nulo): recusa com status 429 e erro rate_limited',
+      callLimiterMalformedA.status === 429 && callLimiterMalformedA.body.error === 'rate_limited',
+    )
+
+    const mockRateLimiterMalformedB = {
+      checkLimit: async () => ({ allowed: 'yes' }) as unknown as { allowed: boolean },
+    }
+    const callLimiterMalformedB = await handleCreateReportEndpoint(
+      { method: 'POST', body: testPayload },
+      { dbClient: mockDbAuditWrites, rateLimiter: mockRateLimiterMalformedB },
+      referenceDate,
+    )
+    assert(
+      suite,
+      'Rate limiter malformado (allowed não é boolean): recusa com status 429 e erro rate_limited',
+      callLimiterMalformedB.status === 429 && callLimiterMalformedB.body.error === 'rate_limited',
+    )
+    assert(
+      suite,
+      'Rate limiter malformado: ZERO inserts tentados acumulados',
+      writeAttemptsOnLimiterFailure === 0,
+    )
+
+    // 4. Rate limiter recusando explicitamente ({ allowed: false }) -> 429 rate_limited
+    const mockRateLimiterBlock: RateLimiter = {
+      checkLimit: async () => ({ allowed: false, remainingRequests: 0 }),
+    }
+    const callLimiterDenied = await handleCreateReportEndpoint(
+      { method: 'POST', body: testPayload },
+      { dbClient: mockDbAuditWrites, rateLimiter: mockRateLimiterBlock },
+      referenceDate,
+    )
+    assert(
+      suite,
+      'Rate limiter recusado: retorna 429 e erro constante rate_limited sem expor reason interna',
+      callLimiterDenied.status === 429 && callLimiterDenied.body.error === 'rate_limited',
+    )
+    assert(
+      suite,
+      'Rate limiter recusado: ZERO inserts tentados',
+      writeAttemptsOnLimiterFailure === 0,
+    )
+
+    // -------------------------------------------------------------
+    // TESTES DE IDEMPOTÊNCIA CANÔNICA E CONCORRÊNCIA ATÔMICA
+    // -------------------------------------------------------------
+    // 5. Aceite inicial com sucesso -> Deve retornar status 201 e corpo canônico { success: true, received: true }
     const firstCall = await handleCreateReportEndpoint(
       { method: 'POST', body: testPayload },
       { dbClient: mockDb, rateLimiter: mockRateLimiterPass },
       referenceDate,
     )
-    assert(suite, 'Primeiro envio com limiter retorna status 201 Created', firstCall.status === 201)
+    assert(suite, 'Aceite inicial retorna status 201 Created', firstCall.status === 201)
     assert(
       suite,
-      'Primeiro envio tem idempotencyStatus CREATED',
-      firstCall.body.idempotencyStatus === 'CREATED',
-    )
-    assert(
-      suite,
-      'Registro recebeu id via gerador (string não vazia)',
-      typeof firstCall.body.reportId === 'string' && firstCall.body.reportId.length > 0,
+      'Aceite inicial corpo público canônico é exatamente { success: true, received: true }',
+      firstCall.body.success === true &&
+        firstCall.body.received === true &&
+        // Nenhuma flag de replay, reportId, status interno ou data
+        !('idempotencyStatus' in firstCall.body) &&
+        !('reportId' in firstCall.body) &&
+        !('status' in firstCall.body) &&
+        !('receivedAt' in firstCall.body),
     )
 
-    // 3º Envio idêntico (mesma idempotencyKey) -> Resposta Neutra SEM vazamento de metadados
-    const secondCall = await handleCreateReportEndpoint(
+    // 6. Replay com chave idêntica existente -> MESMO status (201) e MESMO corpo canônico idêntico
+    const replayCall = await handleCreateReportEndpoint(
       { method: 'POST', body: testPayload },
       { dbClient: mockDb, rateLimiter: mockRateLimiterPass },
       referenceDate,
     )
-    assert(suite, 'Segundo envio idêntico retorna status 200 OK', secondCall.status === 200)
     assert(
       suite,
-      'Segundo envio tem idempotencyStatus IDEMPOTENT_REPLAY',
-      secondCall.body.idempotencyStatus === 'IDEMPOTENT_REPLAY',
+      'Replay subsequente devolve o MESMO status 201 que o aceite inicial',
+      replayCall.status === 201 && replayCall.status === firstCall.status,
     )
     assert(
       suite,
-      'Resposta neutra NÃO vaza reportId a quem repete a chave',
-      secondCall.body.reportId === undefined,
+      'Replay devolve corpo público canônico idêntico ao aceite inicial',
+      JSON.stringify(replayCall.body) === JSON.stringify(firstCall.body) &&
+        replayCall.body.success === true &&
+        replayCall.body.received === true &&
+        !('idempotencyStatus' in replayCall.body) &&
+        !('reportId' in replayCall.body) &&
+        !('status' in replayCall.body) &&
+        !('receivedAt' in replayCall.body),
     )
     assert(
       suite,
-      'Resposta neutra NÃO vaza status interno do relato',
-      secondCall.body.status === undefined,
-    )
-    assert(
-      suite,
-      'Resposta neutra NÃO vaza timestamp receivedAt original',
-      secondCall.body.receivedAt === undefined,
-    )
-    assert(
-      suite,
-      'Banco em memória não foi duplicado (apenas 1 registro gravado)',
+      'Persistência em memória preservada em exatamente 1 registro gravado',
       memoryStore.length === 1,
     )
 
-    // 4º Envio com limiter bloqueando -> Deve retornar 429
-    const mockRateLimiterBlock: RateLimiter = {
-      checkLimit: async () => ({
-        allowed: false,
-        remainingRequests: 0,
-        retryAfterSeconds: 60,
-        reason: 'Taxa máxima de submissões excedida.',
-      }),
+    // 7. Conflito de unicidade de idempotência em concorrência atômica (insert simulado com colisão única)
+    const concurrentPayload: CreateReportRequestPayload = {
+      ...testPayload,
+      idempotencyKey: 'E2E_SYNTH_CONCURRENT_RACE_KEY',
     }
-    const rateBlockedCall = await handleCreateReportEndpoint(
-      { method: 'POST', body: testPayload },
-      { dbClient: mockDb, rateLimiter: mockRateLimiterBlock },
+    // Mock db onde o find não acha (race condition onde duas threads chegam juntas), mas o insert colide
+    const mockDbConcurrentRace: MockDatabaseClient = {
+      findReportByIdempotencyKey: async () => null, // primeira thread ainda não terminou quando segunda faz find
+      insertReport: async () => {
+        // Banco real levantaria violação de constraint de unicidade (código 23505)
+        throw new IdempotencyConflictError('duplicate key value violates unique constraint')
+      },
+    }
+    const raceCall = await handleCreateReportEndpoint(
+      { method: 'POST', body: concurrentPayload },
+      { dbClient: mockDbConcurrentRace, rateLimiter: mockRateLimiterPass },
       referenceDate,
     )
     assert(
       suite,
-      'Limiter acionado retorna status 429 Too Many Requests',
-      rateBlockedCall.status === 429 && rateBlockedCall.body.success === false,
+      'Conflito concorrente na inserção atômica devolve o MESMO status 201',
+      raceCall.status === 201,
+    )
+    assert(
+      suite,
+      'Conflito concorrente devolve o MESMO corpo público canônico { success: true, received: true }',
+      JSON.stringify(raceCall.body) === JSON.stringify(firstCall.body),
     )
 
-    // 5º Envio com Método Não Permitido (GET)
+    // 8. Método não permitido (GET)
     const getCall = await handleCreateReportEndpoint(
       { method: 'GET', body: null },
       { dbClient: mockDb, rateLimiter: mockRateLimiterPass },
@@ -343,7 +449,7 @@ export async function runSyntheticTests(): Promise<{
   }
 
   // =========================================================================
-  // SUÍTE 4: Geração e Validação de ID de Relato (Fail-Closed, Zero Inserts)
+  // SUÍTE 4: Geração e Validação de ID de Relato (UUID Exato no Insert, Rejeição de Espaços, Fail-Closed)
   // =========================================================================
   {
     const suite = 'serverReportEndpointDraft — Geração e Validação de ID'
@@ -390,6 +496,49 @@ export async function runSyntheticTests(): Promise<{
       isValidReportId('invalid-uuid-v4-format-string') === false,
     )
 
+    // REJEIÇÃO ESTRITA DE VALORES COM ESPAÇO (início, fim ou meio) — SEM trim permissivo
+    assert(
+      suite,
+      'isValidReportId REJEITA espaço no início (" a1b2c3d4...")',
+      isValidReportId(' a1b2c3d4-e5f6-4a1b-8c2d-3e4f5a6b7c8d') === false,
+    )
+    assert(
+      suite,
+      'isValidReportId REJEITA espaço no fim ("...3e4f5a6b7c8d ")',
+      isValidReportId('a1b2c3d4-e5f6-4a1b-8c2d-3e4f5a6b7c8d ') === false,
+    )
+    assert(
+      suite,
+      'isValidReportId REJEITA espaço no meio ("a1b2 c3d4...")',
+      isValidReportId('a1b2 c3d4-e5f6-4a1b-8c2d-3e4f5a6b7c8d') === false,
+    )
+
+    // Endpoint com gerador retornando UUID com espaços -> rejeita e ZERO inserts
+    let insertsWithSpaces = 0
+    const mockDbSpaces: MockDatabaseClient = {
+      findReportByIdempotencyKey: async () => null,
+      insertReport: async (data) => {
+        insertsWithSpaces++
+        return { id: data.id }
+      },
+    }
+
+    const resWithSpaceInUuid = await handleCreateReportEndpoint(
+      { method: 'POST', body: testPayload },
+      {
+        dbClient: mockDbSpaces,
+        rateLimiter: mockRateLimiterPass,
+        idGenerator: () => ' a1b2c3d4-e5f6-4a1b-8c2d-3e4f5a6b7c8d ',
+      },
+      referenceDate,
+    )
+    assert(
+      suite,
+      'Gerador retornando UUID com espaço: endpoint rejeita com status 500 e erro internal_error',
+      resWithSpaceInUuid.status === 500 && resWithSpaceInUuid.body.error === 'internal_error',
+    )
+    assert(suite, 'Gerador com espaço: ZERO inserts efetuados no banco', insertsWithSpaces === 0)
+
     // (a) crypto ausente simulado -> generateDefaultReportId lança exceção, zero inserts, erro público constante
     let insertsCountA = 0
     const mockDbA: MockDatabaseClient = {
@@ -400,7 +549,6 @@ export async function runSyntheticTests(): Promise<{
       },
     }
 
-    // Gerador que simula ambiente com crypto ausente (lança como o novo generateDefaultReportId)
     const generatorCryptoAbsent = () => {
       throw new Error('Web Crypto API indisponível para geração segura de identificador de relato.')
     }
@@ -527,19 +675,18 @@ export async function runSyntheticTests(): Promise<{
       insertsCountC === 0,
     )
 
-    // (d) gerador seguro -> fluxo normal com insert e ID válido
+    // (d) gerador seguro -> fluxo normal com insert e UUID gravado EXATAMENTE igual ao validado
     let insertsCountD = 0
-    let insertedIdD = ''
+    let insertedRecordId = ''
     const mockDbD: MockDatabaseClient = {
       findReportByIdempotencyKey: async () => null,
       insertReport: async (data) => {
         insertsCountD++
-        insertedIdD = data.id
+        insertedRecordId = data.id
         return { id: data.id }
       },
     }
 
-    // Testa tanto gerador customizado seguro quanto generateDefaultReportId padrão
     const validUuidV4Sample = 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
     const resSafe = await handleCreateReportEndpoint(
       { method: 'POST', body: testPayload },
@@ -552,15 +699,16 @@ export async function runSyntheticTests(): Promise<{
       'Cenário (d): Gerador seguro -> status 201 Created',
       resSafe.status === 201 && resSafe.body.success === true,
     )
+    assert(suite, 'Cenário (d): Gerador seguro -> 1 insert executado', insertsCountD === 1)
     assert(
       suite,
-      'Cenário (d): Gerador seguro -> 1 insert executado',
-      insertsCountD === 1 && insertedIdD === validUuidV4Sample,
+      'Cenário (d): UUID gravado no banco é EXATAMENTE o validado do gerador',
+      insertedRecordId === validUuidV4Sample,
     )
     assert(
       suite,
-      'Cenário (d): Gerador seguro -> reportId retornado corresponde ao UUID validado',
-      resSafe.body.reportId === validUuidV4Sample,
+      'Cenário (d): Corpo de resposta público não expõe reportId nem metadados internos',
+      !('reportId' in resSafe.body),
     )
 
     // Testa generateDefaultReportId no ambiente atual
@@ -568,11 +716,12 @@ export async function runSyntheticTests(): Promise<{
       const generatedDefault = generateDefaultReportId()
       assert(
         suite,
-        'Cenário (d2): generateDefaultReportId() em runtime produz UUID v4 válido RFC 4122',
-        isValidReportId(generatedDefault) && UUID_V4_REGEX.test(generatedDefault),
+        'Cenário (d2): generateDefaultReportId() em runtime produz UUID v4 válido RFC 4122 sem espaços',
+        isValidReportId(generatedDefault) &&
+          UUID_V4_REGEX.test(generatedDefault) &&
+          !/\s/.test(generatedDefault),
       )
     } catch {
-      // Se ambiente não tiver crypto em tempo de execução de teste estrito, não deve inventar fallback
       assert(
         suite,
         'Cenário (d2): generateDefaultReportId sem crypto lança erro em conformidade fail-closed',
@@ -582,47 +731,155 @@ export async function runSyntheticTests(): Promise<{
   }
 
   // =========================================================================
-  // SUÍTE 5: Verificação de Equipe Server-Side com Gate Default-Deny
+  // SUÍTE 5: Gate de Equipe (Staff) Server-Side — Exceções, Retornos Inválidos e Identidade Comprovada
   // =========================================================================
   {
-    const suite = 'assertStaffAccessGate — Verificação de Equipe Server-Side'
+    const suite = 'assertStaffAccessGate — Gate de Equipe Server-Side'
 
-    // Cenário 1: Sem verificador fornecido -> Default-Deny estrito
+    // 1. Verificador ausente -> Nega (default-deny)
     const noVerifierRes = await assertStaffAccessGate(null, {
       authorizationHeader: 'Bearer fake_token',
     })
     assert(
       suite,
-      'Sem verificador de equipe configurado, acesso é negado (default-deny)',
-      noVerifierRes.allowed === false,
+      'Verificador ausente: acesso negado com reason access_denied',
+      noVerifierRes.allowed === false && noVerifierRes.reason === 'access_denied',
     )
 
-    // Cenário 2: Verificador que rejeita credencial
-    const rejectingVerifier: StaffIdentityVerifier = {
-      verifyStaffMembership: async () => ({
-        isStaffMember: false,
-        errorReason: 'Token não pertence a membro ativo da equipe Ferri & Ferri.',
-      }),
+    // 2. Verificador que LANÇA exceção -> Nega por segurança (fail-closed)
+    const crashingVerifier: StaffIdentityVerifier = {
+      verifyStaffMembership: async () => {
+        throw new Error('Falha de RPC ou timeout no diretório LDAP/Auth')
+      },
     }
-    const rejectedRes = await assertStaffAccessGate(rejectingVerifier, {
-      authorizationHeader: 'Bearer invalid_or_generic_auth',
-    })
-    assert(suite, 'Operador não-staff é rejeitado pelo verificador', rejectedRes.allowed === false)
-
-    // Cenário 3: Verificador que confirma membro da equipe
-    const approvingVerifier: StaffIdentityVerifier = {
-      verifyStaffMembership: async () => ({
-        isStaffMember: true,
-        staffUserId: 'staff_ferri_01',
-      }),
-    }
-    const approvedRes = await assertStaffAccessGate(approvingVerifier, {
-      authorizationHeader: 'Bearer valid_staff_credential',
+    const crashRes = await assertStaffAccessGate(crashingVerifier, {
+      authorizationHeader: 'Bearer crashing_token',
     })
     assert(
       suite,
-      'Membro comprovado da equipe é aprovado com identificador',
-      approvedRes.allowed === true && approvedRes.staffUserId === 'staff_ferri_01',
+      'Verificador que lança exceção: acesso negado sem vazar erro',
+      crashRes.allowed === false && crashRes.reason === 'access_denied',
+    )
+
+    // 3. Verificador que retorna valor MALFORMADO / INVÁLIDO
+    const malformedVerifierA = {
+      verifyStaffMembership: async () => null as unknown as { isStaffMember: boolean },
+    }
+    const malformedResA = await assertStaffAccessGate(malformedVerifierA, {})
+    assert(
+      suite,
+      'Verificador com retorno nulo: negado por retorno inválido',
+      malformedResA.allowed === false && malformedResA.reason === 'access_denied',
+    )
+
+    const malformedVerifierB = {
+      verifyStaffMembership: async () =>
+        ({ isStaffMember: 'true' }) as unknown as { isStaffMember: boolean },
+    }
+    const malformedResB = await assertStaffAccessGate(malformedVerifierB, {})
+    assert(
+      suite,
+      'Verificador com isStaffMember não-boolean: negado',
+      malformedResB.allowed === false && malformedResB.reason === 'access_denied',
+    )
+
+    // 4. Verificador que retorna isStaffMember: false
+    const rejectingVerifier: StaffIdentityVerifier = {
+      verifyStaffMembership: async () => ({
+        isStaffMember: false,
+        errorReason: 'Operador não pertence à equipe',
+      }),
+    }
+    const rejectedRes = await assertStaffAccessGate(rejectingVerifier, {})
+    assert(
+      suite,
+      'Verificador com isStaffMember: false: negado com access_denied',
+      rejectedRes.allowed === false && rejectedRes.reason === 'access_denied',
+    )
+
+    // 5. EXIGÊNCIA DE IDENTIDADE COMPROVADA NÃO VAZIA
+    // 5a. isStaffMember: true mas staffUserId AUSENTE (undefined)
+    const noIdVerifier: StaffIdentityVerifier = {
+      verifyStaffMembership: async () => ({
+        isStaffMember: true,
+      }),
+    }
+    const noIdRes = await assertStaffAccessGate(noIdVerifier, {})
+    assert(
+      suite,
+      'Staff sem staffUserId informado: negado (exige identidade não-vazia)',
+      noIdRes.allowed === false && noIdRes.reason === 'access_denied',
+    )
+
+    // 5b. staffUserId é string VAZIA ou apenas espaços
+    const emptyIdVerifier: StaffIdentityVerifier = {
+      verifyStaffMembership: async () => ({
+        isStaffMember: true,
+        staffUserId: '   ',
+      }),
+    }
+    const emptyIdRes = await assertStaffAccessGate(emptyIdVerifier, {})
+    assert(
+      suite,
+      'Staff com staffUserId vazio/em branco: negado',
+      emptyIdRes.allowed === false && emptyIdRes.reason === 'access_denied',
+    )
+
+    // 5c. "authenticated" genérico NÃO basta como prova de staff
+    const genericAuthVerifier: StaffIdentityVerifier = {
+      verifyStaffMembership: async () => ({
+        isStaffMember: true,
+        staffUserId: 'authenticated',
+      }),
+    }
+    const genericAuthRes = await assertStaffAccessGate(genericAuthVerifier, {})
+    assert(
+      suite,
+      '"authenticated" genérico: expressamente rejeitado como prova de staff',
+      genericAuthRes.allowed === false && genericAuthRes.reason === 'access_denied',
+    )
+
+    // 5d. Domínio de e-mail / e-mail puro NÃO basta como prova de staff
+    const emailDomainVerifier: StaffIdentityVerifier = {
+      verifyStaffMembership: async () => ({
+        isStaffMember: true,
+        staffUserId: '@ferriferriadv.com.br',
+      }),
+    }
+    const emailDomainRes = await assertStaffAccessGate(emailDomainVerifier, {})
+    assert(
+      suite,
+      'Domínio de e-mail puro: expressamente rejeitado como prova de staff',
+      emailDomainRes.allowed === false && emailDomainRes.reason === 'access_denied',
+    )
+
+    const fullEmailVerifier: StaffIdentityVerifier = {
+      verifyStaffMembership: async () => ({
+        isStaffMember: true,
+        staffUserId: 'operador@ferriferriadv.com.br',
+      }),
+    }
+    const fullEmailRes = await assertStaffAccessGate(fullEmailVerifier, {})
+    assert(
+      suite,
+      'E-mail não basta como identidade de staff comprovada',
+      fullEmailRes.allowed === false && fullEmailRes.reason === 'access_denied',
+    )
+
+    // 6. Identidade de equipe legítima comprovada e não-vazia -> APROVADO
+    const validStaffVerifier: StaffIdentityVerifier = {
+      verifyStaffMembership: async () => ({
+        isStaffMember: true,
+        staffUserId: 'staff_ferri_adv_01',
+      }),
+    }
+    const approvedRes = await assertStaffAccessGate(validStaffVerifier, {
+      authorizationHeader: 'Bearer valid_ferri_staff_jwt',
+    })
+    assert(
+      suite,
+      'Membro de equipe com identidade comprovada válida: aprovado com ID',
+      approvedRes.allowed === true && approvedRes.staffUserId === 'staff_ferri_adv_01',
     )
   }
 
