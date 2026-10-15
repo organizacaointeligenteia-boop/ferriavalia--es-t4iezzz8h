@@ -8,40 +8,40 @@
 
 @layer base {
   :root {
-    /* Ferri & Ferri Design System */
-    /* Fundo #F5F8F7 -> 160 14% 97% */
-    --background: 160 14% 97%;
-    /* Texto principal #1A2E33 -> 192 33% 15% */
-    --foreground: 192 33% 15%;
+    /* Ferri & Ferri Design System - Oficial (Azul-marinho escuro + Dourado) */
+    /* Fundo neutro suave #F8FAFC -> 210 40% 98% */
+    --background: 210 40% 98%;
+    /* Texto principal #0F172A -> 222 47% 11% */
+    --foreground: 222 47% 11%;
 
     --card: 0 0% 100%;
-    --card-foreground: 192 33% 15%;
+    --card-foreground: 222 47% 11%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 192 33% 15%;
+    --popover-foreground: 222 47% 11%;
 
-    /* Primário azul-petróleo #0B3B4F -> 197 76% 18% */
-    --primary: 197 76% 18%;
+    /* Primário azul-marinho bem escuro #0A1F33 -> 209 67% 12% */
+    --primary: 209 67% 12%;
     --primary-foreground: 0 0% 100%;
 
-    /* Secundário verde discreto #1B6B4A -> 155 60% 26% */
-    --secondary: 155 60% 26%;
-    --secondary-foreground: 0 0% 100%;
+    /* Secundário / Acento Dourado #C9A227 -> 45 68% 47% */
+    --secondary: 45 68% 47%;
+    --secondary-foreground: 209 67% 12%;
 
-    --muted: 168 15% 92%;
-    --muted-foreground: 194 13% 37%;
+    --muted: 210 20% 94%;
+    --muted-foreground: 215 16% 47%;
 
-    --accent: 160 14% 94%;
-    --accent-foreground: 197 76% 18%;
+    --accent: 45 40% 95%;
+    --accent-foreground: 209 67% 12%;
 
     /* Erro #B3261E */
     --destructive: 3 71% 41%;
     --destructive-foreground: 0 0% 100%;
 
-    /* Borda #D8E2E0 -> 171 11% 87% */
-    --border: 171 11% 87%;
-    --input: 171 11% 87%;
-    --ring: 197 76% 18%;
+    /* Borda #E2E8F0 -> 214 32% 91% */
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 209 67% 12%;
 
     --radius: 0.5rem;
 

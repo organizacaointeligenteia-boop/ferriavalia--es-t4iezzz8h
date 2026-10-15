@@ -1,77 +1,75 @@
 # Ferri & Ferri — Relatos e Experiência
 
-Protótipo frontend estático e em memória para coleta voluntária de experiência de atendimento e organização interna de relatos, desenvolvido para um **único escritório** de advocacia.
+Protótipo frontend estático e em memória para coleta voluntária de experiência de atendimento e organização interna de relatos, desenvolvido para um **único escritório** de advocacia (**Ferri & Ferri Advogados**).
 
-> **AVISO IMPORTANTE:** Este projeto NÃO é um SaaS, NÃO é voltado para venda a advogados ou terceiros, NÃO contém banco de dados, autenticação, storage ou integrações com a internet. Trata-se de um protótipo demonstrativo restrito para validação de fluxos e conformidade deontológica.
+> **AVISO IMPORTANTE:** Este projeto NÃO é um SaaS, NÃO é voltado para venda a advogados ou terceiros, NÃO contém banco de dados, autenticação, storage ou integrações com a internet. Trata-se de um protótipo demonstrativo restrito para validação de fluxos e conformidade deontológica. **NÃO está pronto para dados reais.**
 
 ---
 
-## 1. O Que É Simulado Neste Protótipo
+## 1. Identidade Visual Oficial e Asset do Logo
+
+Nesta rodada de identidade visual, a interface foi completamente alinhada à identidade visual do escritório **Ferri & Ferri Advogados**, extraída diretamente de seu site oficial ([https://ferriferriadv.com.br/](https://ferriferriadv.com.br/)):
+
+- **Paleta Oficial Aplicada:**
+  - **Azul-Marinho Bem Escuro** (`#0A1F33` / `#071624` / `#132E4A`): Utilizado como cor primária no topo/header, botões de ação principal, footer e cartões de destaque.
+  - **Acentos Dourados** (`#C9A227` / `#E5C048` / `#A68218`): Utilizados em ícones, bordas selecionadas, destaques, rótulos e elementos de contraste.
+  - **Fundos Claros Neutros** (`#F8FAFC` / `#FFFFFF`): Fundos elegantes e sóbrios para leitura e preenchimento de formulários.
+  - **Remoção Total de Verdes:** Toda a paleta verde genérica da primeira versão foi substituída, garantindo contraste AA e sobriedade jurídica.
+
+- **Asset Oficial do Logo:**
+  - **Origem exata:** `https://ferriferriadv.com.br/wp-content/uploads/2026/06/Logo-FerriFerri-horizontal.png` (observado diretamente no DOM do cabeçalho do site oficial).
+  - **Dimensões nativas:** 437 × 101 px (horizontal, tipografia branca sobre fundo escuro).
+  - **Data de verificação:** Fevereiro/2025.
+  - **Aplicação no Frontend:** Servido via componente dedicado `FerriFerriLogo` (`src/components/FerriFerriLogo.tsx`) sobre fundo azul-marinho escuro (`#0A1F33`), preservando a proporção original estrita sem distorção (`aspectRatio: 437/101`) e texto alternativo acessível em pt-BR (`alt="Ferri & Ferri Advogados"`).
+  - **Tratamento de Fallback:** Caso haja bloqueio de rede ou indisponibilidade de carregamento do asset, o componente ativa automaticamente o fallback puramente tipográfico estilizado `"FERRI & FERRI ADVOGADOS"`, sem inventar monogramas ou logotipos alternativos.
+
+---
+
+## 2. O Que É Simulado Neste Protótipo
 
 Todo o funcionamento é executado 100% no navegador (client-side) em memória React:
-- **Ausência de Backend e Banco de Dados:** Não existem chamadas `fetch`, `axios` ou conexões a APIs externas.
+- **Ausência de Backend e Banco de Dados:** Não existem chamadas `fetch`, `axios` ou conexões a APIs externas em runtime.
 - **Fixtures Sintéticas (`E2E_SYNTH_`):** Todos os registros pré-carregados utilizam IDs e nomes sintéticos como `E2E_SYNTH_001`, `E2E_SYNTH_Cliente_Demo_Alpha`. Novos envios feitos no formulário recebem automaticamente o prefixo `E2E_SYNTH_`.
 - **Persistência em Memória (Volátil):** Ao recarregar a página (F5 ou refresh do navegador), todos os relatos cadastrados ou status alterados são descartados e retornam ao estado inicial. Há avisos visíveis em todas as telas sobre essa volatilidade.
-- **Painel Interno Sem Login:** O painel interno é acessível diretamente para avaliação da usabilidade e da máquina de estados, porém conta com banner de advertência explícito de que o ambiente **não é seguro para dados reais**.
+- **Painel Interno Sem Login:** O painel interno é acessível diretamente para avaliação da usabilidade e da máquina de estados, porém conta com banner de advertência explícito de que o ambiente **não é seguro para dados reais nem informações confidenciais**.
 - **Mural Público Desativado:** A tela do Mural é uma prévia estritamente privada com exemplos ilustrativos. O interruptor de ativação bloqueia o acionamento via modal ético, impossibilitando qualquer publicação.
 - **QR Code e URL Pública Pendentes:** Não foi inventado domínio público e o QR code está marcado como não operacional até decisão formal e confirmação de domínio homologado.
 
 ---
 
-## 2. Testes e Validações Executados vs. Apenas Preparados
+## 3. Testes e Validações Executados vs. Apenas Preparados
 
-### Realmente Executados nesta Entrega:
-- **Build de Produção do Vite:** Executado com sucesso via pipeline de QA sem erros de compilação de assets.
-- **Verificação Estática TypeScript (`tsc`):** Concluída com zero erros de tipagem estrita.
-- **Linter Oxlint:** Concluído com zero violações de sintaxe e regras de código.
-- **Validação de Rotas e Telas:**
-  - `/` (Institucional): Renderização de todas as seções (Hero, Sobre, Ética OAB, Como Participar em 3 passos anti-sigilo, Privacidade e Contato marcado como DEMO).
-  - `/relatar`: Fluxo em 2 etapas com consentimento obrigatório e desmarcado por padrão na etapa 1, campos opcionais com limite de caracteres e validação de data não futura na etapa 2, e painel de sucesso com ID sintético gerado.
+### (a) QA Literal e Estático Realmente Executado nesta Rodada Visual:
+- **Build de Produção do Vite (`vite build`):** Executado com sucesso via pipeline de QA sem erros de bundling de CSS ou assets.
+- **Verificação Estática TypeScript (`tsc`):** Concluída com zero erros de tipagem estrita em todo o repositório.
+- **Linter Oxlint (`oxlint src`):** Concluído com zero violações de sintaxe e padrões de código.
+- **Validação de Componentes e Telas sob a Nova Identidade:**
+  - `/` (Institucional): Novo topo azul-marinho escuro, logo oficial horizontal contrastante, botões com acentos dourados, seções institucionais sóbrias.
+  - `/relatar`: Fluxo em 2 etapas com consentimento obrigatório e desmarcado por padrão na etapa 1, campos opcionais com limite de caracteres e validação de data não futura na etapa 2, e painel de confirmação estilizado em azul-marinho e dourado.
   - `/painel`: Filtros com contadores por status, abertura de detalhe do relato, transição na máquina de estados (`Recebido` → `Em Revisão` → `Arquivado` / `Retirada Solicitada`), inclusão de decisões humanas com timestamp e botão de restauração de fixtures.
   - `/mural`: Banner de desativação ética, cards fictícios e bloqueio interativo do toggle que mantém a publicação desativada.
   - Fuso horário explícito: Exibição consistente em `America/São Paulo (UTC-3)` e formatação brasileira de datas `DD/MM/AAAA`.
 
-### Apenas Preparados (Não Executados por Escopo e Ausência de Backend):
-- **Testes de Integração com Banco de Dados:** Não executados, pois o projeto não possui e não deve possuir backend ou banco nesta fase.
-- **Testes de Autenticação Real e Sessões HTTP:** Não executados, pois não há camada de autenticação real implementada.
-- **Testes de Conectividade de Rede / Testes E2E Automatizados com Navegador Headless (Playwright/Cypress):** Apenas o fluxo manual e tipos foram validados nesta fase de prototipagem rápida.
+### (b) Testes de Negócio / Infraestrutura NÃO Executados nesta Rodada:
+- **Testes de Integração com Banco de Dados e Backend:** Não executados, pois o projeto não possui e não deve possuir backend ou persistência externa nesta fase.
+- **Testes de Autenticação Real e Sessões HTTP:** Não executados, pois o painel é protótipo sem login.
+- **Testes E2E Automatizados com Navegador Headless (Playwright/Cypress):** Não executados nesta rodada visual exclusiva.
 
 ---
 
-## 3. Pendências Futuras de Infraestrutura (Caso o Escritório Decida Avançar)
+## 4. Pendências Declaradas de Infraestrutura e Governança
 
-Se em momento futuro o escritório deliberar pela implementação de uma versão de produção em ambiente fechado, as seguintes pendências técnicas precisarão ser implementadas separadamente:
-1. **Banco de Dados Relacional Próprio:** Criação de schemas isolados com criptografia em repouso e políticas rigorosas de retenção e expurgo.
-2. **Camada de Autenticação e Perfis de Acesso (RBAC):**
-   - Perfil de Responsável / Sócio (deliberação ética, arquivamento e autorização).
-   - Perfil de Triagem Interna (leitura e marcação de revisão).
-   - Autenticação de dois fatores (2FA) e expiração forçada de sessão.
-3. **Storage Seguro:** Armazenamento restrito para logs de auditoria e auditoria de decisões humanas.
-4. **Trilhas de Auditoria Imutáveis:** Registro criptográfico de quando um consentimento foi prestado e quando um pedido de retirada foi solicitado.
+1. **Asset do Logo / Deploy Local:** O asset oficial remoto é referenciado diretamente de `https://ferriferriadv.com.br/wp-content/uploads/2026/06/Logo-FerriFerri-horizontal.png` com fallback tipográfico nativo caso haja restrição de CORS em redes fechadas.
+2. **QR Code e URL Pública:** Pendente de homologação de domínio próprio pelo escritório. Nenhum domínio falso foi introduzido.
+3. **Revisão Ética OAB Obrigatória:** Toda veiculação externa de relatos de atendimento permanece estritamente bloqueada até deliberação do responsável técnico e parecer deontológico da OAB sobre o Provimento n.º 205/2021.
+4. **Segurança e Criptografia:** Em eventual transição para produção, será necessário implementar backend autenticado com 2FA, banco de dados isolado com criptografia em repouso e trilhas de auditoria imutáveis.
 
 ---
 
-## 4. Segurança, Perfis, Retenção, Retirada e Aviso de Privacidade
-
-- **Proteção do Sigilo Profissional:** O formulário orienta expressamente: *"Não insira fatos do caso, nomes de terceiros ou informações sigilosas."* Nenhum documento processual, número de processo ou CPF é coletado.
-- **Coleta Privada ≠ Não Anônima:** O sistema adota uma postura transparente. A coleta não promete anonimato absoluto aos clientes, mas garante confidencialidade interna estrita.
-- **Direito à Retirada a Qualquer Tempo:** O constituinte possui o direito irrevogável de solicitar a retirada de sua manifestação. O painel prevê o status `Retirada Solicitada` para atendimento imediato.
-- **Aviso Deontológico OAB:** O formulário e as telas deixam claro que o envio voluntário jamais condiciona ou interfere no atendimento jurídico prestado pelo escritório.
-
----
-
-## 5. Revisão Ética OAB Obrigatória Antes de Qualquer Piloto
-
-A publicidade na advocacia é restrita pelas diretrizes do Código de Ética e Disciplina da OAB e pelo Provimento n.º 205/2021 do Conselho Federal da OAB:
-- **Autorização do Cliente Não Basta:** A concordância do cliente em avaliar o atendimento interno não autoriza a veiculação externa da manifestação como propaganda ou captação de clientela.
-- **Vedação de Promessas de Resultado e Captação Mercantil:** É vedada a menção a causas ganhas, valores, comparações de capacidade técnica ou expressões persuasivas de induzimento.
-- **Homologação Prévia:** Antes de qualquer disponibilização mesmo em ambiente piloto com clientes reais, é mandatória a apreciação formal da comissão de ética ou do responsável técnico do escritório Ferri & Ferri.
-
----
-
-## 6. Confirmação de Integridade
+## 5. Confirmação de Integridade
 
 - **Nenhum dado real foi coletado ou solicitado.**
 - **Nenhum serviço externo (Asaas, Stripe, IA, banco de dados ou redes) foi conectado.**
 - **Nenhuma publicação ou deploy público foi realizado.**
 - **Nenhuma terminologia médica ou estrutura de múltiplos clientes (multi-tenant) foi introduzida.**
+- **Nenhum dado pessoal, número de processo ou CPF é coletado pelo aplicativo.**

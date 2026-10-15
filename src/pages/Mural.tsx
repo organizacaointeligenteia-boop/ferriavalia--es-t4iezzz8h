@@ -69,15 +69,15 @@ export default function Mural() {
   return (
     <div className="space-y-6 sm:space-y-8 animate-fade-in">
       {/* Rótulo de Demonstração */}
-      <div className="flex items-center justify-between bg-amber-50 border border-amber-200 text-[#8A6D1A] px-3.5 py-2 rounded-md text-xs">
+      <div className="flex items-center justify-between bg-[#0A1F33]/5 border border-[#C9A227]/30 text-[#0A1F33] px-3.5 py-2 rounded-md text-xs">
         <div className="flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 shrink-0 text-[#8A6D1A]" />
+          <AlertTriangle className="w-4 h-4 shrink-0 text-[#C9A227]" />
           <span>
             <strong>PRÉVIA FICTÍCIA E PRIVADA:</strong> O mural externo NÃO está ativo e não é
             público.
           </span>
         </div>
-        <span className="text-[11px] font-semibold bg-[#8A6D1A] text-white px-2 py-0.5 rounded">
+        <span className="text-[11px] font-semibold bg-[#C9A227] text-[#0A1F33] px-2 py-0.5 rounded shadow-2xs">
           DESATIVADO
         </span>
       </div>
@@ -85,28 +85,28 @@ export default function Mural() {
       {/* Cabeçalho */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="space-y-1">
-          <div className="flex items-center gap-2 text-xs font-semibold text-[#8A6D1A] uppercase tracking-wider">
-            <EyeOff className="w-4 h-4" />
+          <div className="flex items-center gap-2 text-xs font-semibold text-[#A68218] uppercase tracking-wider">
+            <EyeOff className="w-4 h-4 text-[#C9A227]" />
             Visualização Interna Experimental
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-[#0B3B4F] tracking-tight">
+          <h1 className="text-2xl sm:text-3xl font-bold text-[#0A1F33] tracking-tight">
             Mural — Prévia Fictícia e Privada
           </h1>
-          <p className="text-xs sm:text-sm text-[#52656B]">
+          <p className="text-xs sm:text-sm text-slate-600">
             Exemplo visual de formato de relatos, rigorosamente restrito a amostras simuladas e
             mantido inoperante.
           </p>
         </div>
 
         {/* Toggle de ativação (Sempre desativado por design ético) */}
-        <div className="flex items-center gap-3 bg-white p-2.5 rounded-lg border border-[#D8E2E0] shadow-2xs self-start sm:self-auto">
-          <span className="text-xs font-semibold text-[#1A2E33]">Publicação Pública:</span>
+        <div className="flex items-center gap-3 bg-white p-2.5 rounded-lg border border-slate-200 shadow-2xs self-start sm:self-auto">
+          <span className="text-xs font-semibold text-slate-900">Publicação Pública:</span>
           <button
             type="button"
             role="switch"
             aria-checked={toggleActive}
             onClick={handleToggleClick}
-            className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-stone-300 transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0B3B4F]"
+            className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-slate-300 transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227]"
             title="Publicação desativada por razões éticas OAB"
           >
             <span
@@ -120,19 +120,19 @@ export default function Mural() {
       </div>
 
       {/* Banner Destacado Obrigatório */}
-      <div className="bg-[#8A6D1A]/10 border-2 border-[#8A6D1A]/40 rounded-lg p-5 sm:p-6 text-[#1A2E33] space-y-3">
+      <div className="bg-[#0A1F33]/5 border-2 border-[#C9A227]/40 rounded-lg p-5 sm:p-6 text-slate-800 space-y-3">
         <div className="flex items-start gap-3">
-          <ShieldAlert className="w-6 h-6 text-[#8A6D1A] shrink-0 mt-0.5" />
+          <ShieldAlert className="w-6 h-6 text-[#C9A227] shrink-0 mt-0.5" />
           <div className="space-y-2">
-            <h2 className="font-bold text-base text-[#8A6D1A] tracking-tight">
+            <h2 className="font-bold text-base text-[#0A1F33] tracking-tight">
               Este mural está DESATIVADO.
             </h2>
-            <p className="text-xs sm:text-sm text-[#1A2E33] leading-relaxed">
+            <p className="text-xs sm:text-sm text-slate-800 leading-relaxed">
               Publicação e embeds pendentes de revisão ética OAB e decisão específica do
               responsável. Não divulgue nomes, resultados, promessas, comparações ou testemunhos de
               êxito.
             </p>
-            <div className="p-3 bg-white/80 rounded border border-[#8A6D1A]/30 text-xs text-[#52656B] leading-relaxed">
+            <div className="p-3 bg-white rounded border border-[#C9A227]/30 text-xs text-slate-600 leading-relaxed">
               <strong>Finalidade distinta:</strong> A coleta voluntária interna de impressões visa
               exclusivamente à autoavaliação da qualidade do atendimento prestado. O consentimento
               do cliente para responder à pesquisa interna <em>não autoriza</em> publicidade ou
@@ -144,39 +144,42 @@ export default function Mural() {
 
       {/* Grade de Cards Fictícios E2E_SYNTH_ */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between text-xs font-semibold text-[#52656B]">
+        <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
           <span>
             Exemplos Fictícios de Relato (
-            <code className="font-mono text-[#0B3B4F]">E2E_SYNTH_</code>)
+            <code className="font-mono text-[#0A1F33] bg-slate-100 px-1 py-0.5 rounded">
+              E2E_SYNTH_
+            </code>
+            )
           </span>
-          <span className="text-[#8A6D1A]">Sem promessas ou alegações de êxito</span>
+          <span className="text-[#A68218]">Sem promessas ou alegações de êxito</span>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           {MURAL_SYNTHETIC_CARDS.map((card) => (
             <div
               key={card.id}
-              className="bg-white rounded-lg p-5 border border-[#D8E2E0] shadow-xs flex flex-col justify-between space-y-4 hover:shadow-subtle transition-all"
+              className="bg-white rounded-lg p-5 border border-slate-200 shadow-xs flex flex-col justify-between space-y-4 hover:shadow-subtle transition-all"
             >
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold text-sm text-[#0B3B4F]">
+                  <span className="font-semibold text-sm text-[#0A1F33]">
                     {card.clientFirstName}
                   </span>
-                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#8A6D1A]/15 text-[#8A6D1A] border border-[#8A6D1A]/30">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#C9A227]/20 text-[#0A1F33] border border-[#C9A227]/30">
                     Fictício
                   </span>
                 </div>
 
-                <p className="text-xs text-[#1A2E33] italic leading-relaxed">"{card.quote}"</p>
+                <p className="text-xs text-slate-800 italic leading-relaxed">"{card.quote}"</p>
               </div>
 
-              <div className="pt-3 border-t border-[#D8E2E0]/60 space-y-1 text-[11px] text-[#52656B]">
+              <div className="pt-3 border-t border-slate-100 space-y-1 text-[11px] text-slate-500">
                 <div className="flex items-center gap-1.5">
-                  <Calendar className="w-3 h-3 text-[#52656B]" />
+                  <Calendar className="w-3 h-3 text-[#C9A227]" />
                   <span>Data: {card.experienceDate}</span>
                 </div>
-                <div className="text-[10px] text-[#52656B] font-mono">{card.timestamp}</div>
+                <div className="text-[10px] text-slate-400 font-mono">{card.timestamp}</div>
               </div>
             </div>
           ))}
@@ -184,17 +187,17 @@ export default function Mural() {
       </div>
 
       {/* Seção sobre QR Code / Divulgação Externa */}
-      <div className="bg-white rounded-lg p-5 sm:p-6 border border-[#D8E2E0] space-y-3">
-        <div className="flex items-center gap-2.5 text-[#0B3B4F]">
-          <QrCode className="w-5 h-5 text-[#8A6D1A]" />
+      <div className="bg-white rounded-lg p-5 sm:p-6 border border-slate-200 space-y-3">
+        <div className="flex items-center gap-2.5 text-[#0A1F33]">
+          <QrCode className="w-5 h-5 text-[#C9A227]" />
           <h3 className="font-bold text-sm sm:text-base">QR Code e Endereço Público de Coleta</h3>
         </div>
-        <p className="text-xs sm:text-sm text-[#52656B] leading-relaxed">
+        <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
           Nenhum QR code operacional é gerado sem uma URL pública institucional formalmente
           confirmada pela administração do escritório.
         </p>
-        <div className="bg-[#F5F8F7] p-3 rounded text-xs text-[#8A6D1A] font-medium border border-[#D8E2E0] flex items-start gap-2">
-          <Info className="w-4 h-4 shrink-0 mt-0.5 text-[#8A6D1A]" />
+        <div className="bg-slate-50 p-3 rounded text-xs text-slate-700 font-medium border border-slate-200 flex items-start gap-2">
+          <Info className="w-4 h-4 shrink-0 mt-0.5 text-[#C9A227]" />
           <span>
             <strong>Status de Operação:</strong> QR Code e URL pública estão{' '}
             <strong>pendentes de confirmação</strong>. Nenhum domínio externo foi inventado e nenhum
@@ -206,34 +209,34 @@ export default function Mural() {
       {/* MODAL BLOQUEANTE DE ATIVAÇÃO DE PUBLICAÇÃO */}
       {blockingModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-fade-in"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in"
           role="dialog"
           aria-modal="true"
           aria-labelledby="modal-ethics-title"
         >
-          <div className="bg-white rounded-lg max-w-lg w-full p-6 shadow-2xl border-2 border-[#8A6D1A] space-y-5 animate-scale-up">
+          <div className="bg-white rounded-lg max-w-lg w-full p-6 shadow-2xl border-2 border-[#0A1F33] space-y-5 animate-scale-up">
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
-                <ShieldAlert className="w-6 h-6 text-[#8A6D1A]" />
+              <div className="w-10 h-10 rounded-full bg-[#0A1F33] flex items-center justify-center shrink-0 border border-[#C9A227]/40">
+                <ShieldAlert className="w-6 h-6 text-[#C9A227]" />
               </div>
               <div className="space-y-1">
-                <h3 id="modal-ethics-title" className="font-bold text-base text-[#0B3B4F]">
+                <h3 id="modal-ethics-title" className="font-bold text-base text-[#0A1F33]">
                   Publicação Bloqueada — Conformidade Ética OAB
                 </h3>
-                <p className="text-xs text-[#8A6D1A] font-semibold">
+                <p className="text-xs text-[#A68218] font-semibold">
                   Ação não autorizada pelo protocolo deontológico
                 </p>
               </div>
             </div>
 
-            <div className="text-xs sm:text-sm text-[#1A2E33] leading-relaxed bg-[#F5F8F7] p-4 rounded-md border border-[#D8E2E0] space-y-2">
+            <div className="text-xs sm:text-sm text-slate-800 leading-relaxed bg-slate-50 p-4 rounded-md border border-slate-200 space-y-2">
               <p>
                 <strong>Aviso Deontológico:</strong> Publicação e divulgação dos relatos exigem
                 autorização prévia específica do cliente, revisão ética OAB e decisão do
                 responsável.
               </p>
               <p className="text-[#B3261E] font-medium">Autorização do cliente não basta.</p>
-              <p className="text-xs text-[#52656B]">Deseja manter a publicação desativada?</p>
+              <p className="text-xs text-slate-500">Deseja manter a publicação desativada?</p>
             </div>
 
             {/* Botões do Modal: Sempre mantém desativada */}
@@ -241,14 +244,14 @@ export default function Mural() {
               <button
                 type="button"
                 onClick={handleModalBack}
-                className="w-full sm:w-auto px-4 py-2 rounded-md border border-[#D8E2E0] text-xs font-semibold text-[#52656B] hover:bg-[#F5F8F7] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0B3B4F]"
+                className="w-full sm:w-auto px-4 py-2 rounded-md border border-slate-300 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227]"
               >
                 Voltar
               </button>
               <button
                 type="button"
                 onClick={handleModalKeepDisabled}
-                className="w-full sm:w-auto px-5 py-2 rounded-md bg-[#0B3B4F] text-white text-xs font-semibold hover:bg-[#09546B] active:scale-[0.98] transition-all shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0B3B4F]"
+                className="w-full sm:w-auto px-5 py-2 rounded-md bg-[#0A1F33] text-[#E5C048] border border-[#C9A227]/40 text-xs font-semibold hover:bg-[#132E4A] active:scale-[0.98] transition-all shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227]"
               >
                 Manter Desativada
               </button>

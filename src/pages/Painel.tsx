@@ -107,14 +107,14 @@ export default function Painel() {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* 1. Banner Superior de Demonstração e Insegurança */}
-      <div className="p-4 rounded-lg bg-amber-50 border-2 border-[#8A6D1A]/50 text-[#8A6D1A] space-y-2 shadow-xs">
+      <div className="p-4 rounded-lg bg-[#0A1F33]/5 border-2 border-[#C9A227]/40 text-[#0A1F33] space-y-2 shadow-xs">
         <div className="flex items-start gap-3">
-          <AlertTriangle className="w-5 h-5 text-[#8A6D1A] shrink-0 mt-0.5" />
+          <AlertTriangle className="w-5 h-5 text-[#C9A227] shrink-0 mt-0.5" />
           <div className="space-y-1">
-            <div className="font-bold text-sm tracking-tight text-[#8A6D1A] uppercase">
+            <div className="font-bold text-sm tracking-tight text-[#0A1F33] uppercase">
               PAINEL DE DEMONSTRAÇÃO — NÃO USE DADOS REAIS
             </div>
-            <p className="text-xs text-[#1A2E33] leading-relaxed">
+            <p className="text-xs text-slate-700 leading-relaxed">
               Sem autenticação real;{' '}
               <strong>não é seguro para informações confidenciais ou reais</strong>. Este painel
               ilustra exclusivamente a organização interna de relatos e a máquina de estados para
@@ -127,10 +127,10 @@ export default function Painel() {
       {/* Cabeçalho da Página do Painel */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-[#0B3B4F] tracking-tight">
+          <h1 className="text-2xl sm:text-3xl font-bold text-[#0A1F33] tracking-tight">
             Painel Interno de Relatos — DEMO
           </h1>
-          <p className="text-xs sm:text-sm text-[#52656B]">
+          <p className="text-xs sm:text-sm text-slate-600">
             Organização restrita para conferência de atendimento e registro de decisões humanas.
           </p>
         </div>
@@ -139,27 +139,27 @@ export default function Painel() {
         <button
           type="button"
           onClick={resetToInitial}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[#D8E2E0] bg-white text-xs font-medium text-[#52656B] hover:bg-[#F5F8F7] active:scale-[0.98] transition-all self-start sm:self-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0B3B4F]"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 active:scale-[0.98] transition-all self-start sm:self-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227]"
           title="Restaura os dados fictícios originais"
         >
-          <RotateCcw className="w-3.5 h-3.5" />
+          <RotateCcw className="w-3.5 h-3.5 text-[#C9A227]" />
           Restaurar Fixtures Iniciais
         </button>
       </div>
 
       {/* Nota constante de dados voláteis */}
-      <div className="text-xs text-[#52656B] bg-white px-3.5 py-2 rounded border border-[#D8E2E0] flex items-center justify-between flex-wrap gap-2">
+      <div className="text-xs text-slate-600 bg-white px-3.5 py-2 rounded border border-slate-200 flex items-center justify-between flex-wrap gap-2">
         <span className="flex items-center gap-2">
-          <Lock className="w-3.5 h-3.5 text-[#1B6B4A]" />
+          <Lock className="w-3.5 h-3.5 text-[#C9A227]" />
           <span>
             Os dados são fictícios (
-            <code className="bg-[#F5F8F7] px-1 py-0.5 rounded font-mono text-[11px]">
+            <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-[11px] text-[#0A1F33]">
               E2E_SYNTH_
             </code>
             ) e em memória. <strong>Ao recarregar, tudo é perdido.</strong>
           </span>
         </span>
-        <span className="text-[11px] text-[#8A6D1A] font-semibold">
+        <span className="text-[11px] text-[#A68218] font-semibold">
           Fuso oficial: America/São Paulo (UTC-3)
         </span>
       </div>
@@ -178,16 +178,16 @@ export default function Painel() {
                 key={statusName}
                 type="button"
                 onClick={() => setStatusFilter(statusName)}
-                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0B3B4F] ${
+                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227] ${
                   active
-                    ? 'bg-[#0B3B4F] text-white shadow-xs'
-                    : 'bg-white text-[#52656B] border border-[#D8E2E0] hover:bg-[#F5F8F7]'
+                    ? 'bg-[#0A1F33] text-[#E5C048] border border-[#C9A227]/40 shadow-xs'
+                    : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
                 }`}
               >
                 <span>{statusName}</span>
                 <span
                   className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                    active ? 'bg-white/20 text-white' : 'bg-[#F5F8F7] text-[#1A2E33]'
+                    active ? 'bg-[#132E4A] text-[#E5C048]' : 'bg-slate-100 text-slate-700'
                   }`}
                 >
                   {count}
@@ -202,19 +202,19 @@ export default function Painel() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Coluna da Lista de Relatos */}
         <div className={`space-y-3 ${selectedReport ? 'lg:col-span-7' : 'lg:col-span-12'}`}>
-          <div className="text-xs font-semibold text-[#52656B] flex items-center justify-between px-1">
+          <div className="text-xs font-semibold text-slate-500 flex items-center justify-between px-1">
             <span>Listagem de Relatos ({filteredReports.length})</span>
             <span>Máquina de Estados: Recebido → Revisão → Arquivado / Retirada</span>
           </div>
 
           {filteredReports.length === 0 ? (
-            <div className="bg-white p-8 rounded-lg border border-[#D8E2E0] text-center text-sm text-[#52656B] space-y-2">
-              <Filter className="w-8 h-8 mx-auto text-[#D8E2E0]" />
+            <div className="bg-white p-8 rounded-lg border border-slate-200 text-center text-sm text-slate-500 space-y-2">
+              <Filter className="w-8 h-8 mx-auto text-slate-300" />
               <p>Nenhum relato encontrado com o filtro "{statusFilter}".</p>
               <button
                 type="button"
                 onClick={() => setStatusFilter('Todos')}
-                className="text-xs text-[#0B3B4F] underline font-semibold"
+                className="text-xs text-[#0A1F33] underline font-semibold"
               >
                 Ver todos os relatos
               </button>
@@ -228,44 +228,44 @@ export default function Painel() {
                     key={report.id}
                     className={`bg-white rounded-lg p-4 sm:p-5 border transition-all text-left shadow-2xs hover:shadow-subtle ${
                       isSelected
-                        ? 'border-[#0B3B4F] ring-1 ring-[#0B3B4F] bg-blue-50/20'
-                        : 'border-[#D8E2E0] hover:border-[#0B3B4F]/40'
+                        ? 'border-[#0A1F33] ring-2 ring-[#C9A227]/40 bg-[#0A1F33]/2'
+                        : 'border-slate-200 hover:border-[#0A1F33]/30'
                     }`}
                   >
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-[#D8E2E0]/60">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs font-bold text-[#0B3B4F] bg-[#F5F8F7] px-2 py-0.5 rounded border border-[#D8E2E0]">
+                        <span className="font-mono text-xs font-bold text-[#0A1F33] bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
                           {report.id}
                         </span>
-                        <span className="font-semibold text-sm text-[#1A2E33]">
+                        <span className="font-semibold text-sm text-slate-900">
                           {report.clientName}
                         </span>
                       </div>
                       <div className="flex items-center gap-2">{getStatusBadge(report.status)}</div>
                     </div>
 
-                    <p className="text-xs text-[#52656B] line-clamp-2 my-2.5 leading-relaxed">
+                    <p className="text-xs text-slate-600 line-clamp-2 my-2.5 leading-relaxed">
                       "{report.relato}"
                     </p>
 
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-[#52656B] pt-1">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-slate-500 pt-1">
                       <div className="flex items-center gap-1.5">
-                        <Calendar className="w-3.5 h-3.5 text-[#52656B]" />
+                        <Calendar className="w-3.5 h-3.5 text-slate-400" />
                         <span>Exp.: {report.experienceDate}</span>
-                        <span className="text-[#D8E2E0]">|</span>
+                        <span className="text-slate-300">|</span>
                         <span>Recebido: {report.receivedAt}</span>
                       </div>
 
                       <button
                         type="button"
                         onClick={() => setSelectedReportId(report.id)}
-                        className={`inline-flex items-center justify-center gap-1 px-3 py-1 rounded text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0B3B4F] ${
+                        className={`inline-flex items-center justify-center gap-1 px-3 py-1 rounded text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227] ${
                           isSelected
-                            ? 'bg-[#0B3B4F] text-white'
-                            : 'bg-[#F5F8F7] text-[#0B3B4F] hover:bg-[#0B3B4F] hover:text-white border border-[#D8E2E0]'
+                            ? 'bg-[#0A1F33] text-[#E5C048]'
+                            : 'bg-slate-50 text-[#0A1F33] hover:bg-[#0A1F33] hover:text-white border border-slate-200'
                         }`}
                       >
-                        <Eye className="w-3.5 h-3.5" />
+                        <Eye className="w-3.5 h-3.5 text-[#C9A227]" />
                         Ver Detalhes
                       </button>
                     </div>
@@ -278,24 +278,24 @@ export default function Painel() {
 
         {/* 4. Coluna / Drawer de Detalhe (Desktop lateral ou Mobile tela cheia / sobreposto) */}
         {selectedReport && (
-          <div className="lg:col-span-5 bg-white rounded-lg p-5 sm:p-6 border border-[#0B3B4F] shadow-lg space-y-5 sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto animate-fade-in">
+          <div className="lg:col-span-5 bg-white rounded-lg p-5 sm:p-6 border-2 border-[#0A1F33] shadow-lg space-y-5 sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto animate-fade-in">
             {/* Header do Detalhe */}
-            <div className="flex items-start justify-between gap-2 pb-3 border-b border-[#D8E2E0]">
+            <div className="flex items-start justify-between gap-2 pb-3 border-b border-slate-200">
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs font-bold text-[#0B3B4F] bg-[#F5F8F7] px-2 py-0.5 rounded border border-[#D8E2E0]">
+                  <span className="font-mono text-xs font-bold text-[#0A1F33] bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
                     {selectedReport.id}
                   </span>
                   {getStatusBadge(selectedReport.status)}
                 </div>
-                <h3 className="font-bold text-base text-[#1A2E33] mt-1">
+                <h3 className="font-bold text-base text-slate-900 mt-1">
                   {selectedReport.clientName}
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={() => setSelectedReportId(null)}
-                className="p-1 rounded text-[#52656B] hover:text-[#1A2E33] hover:bg-[#F5F8F7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0B3B4F]"
+                className="p-1 rounded text-slate-500 hover:text-slate-900 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227]"
                 aria-label="Fechar painel de detalhes"
               >
                 <X className="w-5 h-5" />
@@ -304,32 +304,32 @@ export default function Painel() {
 
             {/* Metadados e Relato Completo */}
             <div className="space-y-3 text-xs">
-              <div className="p-3 bg-[#F5F8F7] rounded border border-[#D8E2E0] space-y-1.5 text-[11px]">
+              <div className="p-3 bg-slate-50 rounded border border-slate-200 space-y-1.5 text-[11px]">
                 <div className="flex justify-between">
-                  <span className="text-[#52656B]">Data da Experiência:</span>
-                  <span className="font-medium text-[#1A2E33]">
+                  <span className="text-slate-500">Data da Experiência:</span>
+                  <span className="font-medium text-slate-900">
                     {selectedReport.experienceDate}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[#52656B]">Recebimento:</span>
-                  <span className="font-medium text-[#1A2E33]">{selectedReport.receivedAt}</span>
+                  <span className="text-slate-500">Recebimento:</span>
+                  <span className="font-medium text-slate-900">{selectedReport.receivedAt}</span>
                 </div>
               </div>
 
               <div>
-                <label className="font-semibold text-[#1A2E33] block mb-1">
+                <label className="font-semibold text-slate-800 block mb-1">
                   Texto Integral do Relato:
                 </label>
-                <div className="p-3 rounded-md bg-stone-50 border border-stone-200 text-[#1A2E33] text-xs leading-relaxed italic whitespace-pre-wrap">
+                <div className="p-3 rounded-md bg-stone-50 border border-stone-200 text-slate-900 text-xs leading-relaxed italic whitespace-pre-wrap">
                   "{selectedReport.relato}"
                 </div>
               </div>
             </div>
 
             {/* Botões de Transição de Estado */}
-            <div className="space-y-2 pt-2 border-t border-[#D8E2E0]">
-              <label className="font-semibold text-xs text-[#0B3B4F] block">
+            <div className="space-y-2 pt-2 border-t border-slate-200">
+              <label className="font-semibold text-xs text-[#0A1F33] block">
                 Transição de Status (Máquina de Estados):
               </label>
 
@@ -338,7 +338,7 @@ export default function Painel() {
                   <button
                     type="button"
                     onClick={() => handleStatusChange('Em Revisão')}
-                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md bg-amber-600 text-white font-medium hover:bg-amber-700 active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600"
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md bg-[#C9A227] text-[#0A1F33] font-semibold hover:bg-[#A68218] hover:text-white active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227]"
                   >
                     <Eye className="w-3.5 h-3.5" />
                     Marcar como Em Revisão
@@ -349,7 +349,7 @@ export default function Painel() {
                   <button
                     type="button"
                     onClick={() => handleStatusChange('Arquivado')}
-                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md bg-stone-700 text-white font-medium hover:bg-stone-800 active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-700"
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md bg-slate-700 text-white font-medium hover:bg-slate-800 active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-700"
                   >
                     <Archive className="w-3.5 h-3.5" />
                     Marcar como Arquivado
@@ -360,7 +360,7 @@ export default function Painel() {
                   <button
                     type="button"
                     onClick={() => handleStatusChange('Em Revisão')}
-                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md border border-[#D8E2E0] text-[#52656B] font-medium hover:bg-[#F5F8F7] active:scale-[0.98] transition-all"
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md border border-slate-300 text-slate-700 font-medium hover:bg-slate-50 active:scale-[0.98] transition-all"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
                     Reabrir para Revisão
@@ -382,9 +382,9 @@ export default function Painel() {
             </div>
 
             {/* 5. Área de Registro de Decisão Humana (Simulado) */}
-            <div className="space-y-2 pt-3 border-t border-[#D8E2E0]">
-              <label className="font-semibold text-xs text-[#0B3B4F] flex items-center gap-1.5">
-                <MessageSquare className="w-3.5 h-3.5 text-[#1B6B4A]" />
+            <div className="space-y-2 pt-3 border-t border-slate-200">
+              <label className="font-semibold text-xs text-[#0A1F33] flex items-center gap-1.5">
+                <MessageSquare className="w-3.5 h-3.5 text-[#C9A227]" />
                 Registro de decisão humana (simulado)
               </label>
               <form onSubmit={handleAddDecision} className="space-y-2">
@@ -393,33 +393,33 @@ export default function Painel() {
                   value={decisionInput}
                   onChange={(e) => setDecisionInput(e.target.value)}
                   placeholder="Insira a justificativa ou nota ética do responsável..."
-                  className="w-full p-2.5 text-xs rounded-md border border-[#D8E2E0] bg-[#F5F8F7] text-[#1A2E33] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#0B3B4F] transition-all"
+                  className="w-full p-2.5 text-xs rounded-md border border-slate-200 bg-slate-50 text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#0A1F33] transition-all"
                 />
                 <button
                   type="submit"
                   disabled={!decisionInput.trim()}
-                  className={`w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0B3B4F] ${
+                  className={`w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227] ${
                     decisionInput.trim()
-                      ? 'bg-[#0B3B4F] text-white hover:bg-[#09546B] active:scale-[0.98] cursor-pointer'
-                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      ? 'bg-[#0A1F33] text-[#E5C048] hover:bg-[#132E4A] active:scale-[0.98] cursor-pointer'
+                      : 'bg-slate-100 text-slate-400 cursor-not-allowed'
                   }`}
                 >
-                  <Send className="w-3.5 h-3.5" />
+                  <Send className="w-3.5 h-3.5 text-[#C9A227]" />
                   Registrar Decisão
                 </button>
               </form>
 
               {decisionFeedback && (
-                <p className="text-xs text-[#2E7D5B] font-medium p-2 bg-emerald-50 rounded border border-emerald-200 animate-fade-in">
+                <p className="text-xs text-[#0A1F33] font-medium p-2 bg-[#C9A227]/15 rounded border border-[#C9A227]/40 animate-fade-in">
                   {decisionFeedback}
                 </p>
               )}
             </div>
 
             {/* 6. Histórico de Mudanças e Decisões com Timestamps */}
-            <div className="space-y-2 pt-3 border-t border-[#D8E2E0]">
-              <label className="font-semibold text-xs text-[#52656B] flex items-center gap-1.5">
-                <History className="w-3.5 h-3.5" />
+            <div className="space-y-2 pt-3 border-t border-slate-200">
+              <label className="font-semibold text-xs text-slate-500 flex items-center gap-1.5">
+                <History className="w-3.5 h-3.5 text-[#C9A227]" />
                 Histórico de Ações e Timestamps
               </label>
 
@@ -427,14 +427,14 @@ export default function Painel() {
                 {selectedReport.history.map((hist, idx) => (
                   <div
                     key={idx}
-                    className="p-2.5 rounded bg-[#F5F8F7] border border-[#D8E2E0]/80 text-[11px] space-y-1"
+                    className="p-2.5 rounded bg-slate-50 border border-slate-200 text-[11px] space-y-1"
                   >
-                    <div className="flex items-center justify-between text-[#52656B]">
-                      <span className="font-semibold text-[#0B3B4F]">{hist.action}</span>
+                    <div className="flex items-center justify-between text-slate-500">
+                      <span className="font-semibold text-[#0A1F33]">{hist.action}</span>
                     </div>
-                    <div className="text-[10px] text-[#52656B] font-mono">{hist.timestamp}</div>
+                    <div className="text-[10px] text-slate-400 font-mono">{hist.timestamp}</div>
                     {hist.note && (
-                      <p className="text-[#1A2E33] italic pt-0.5 leading-tight">"{hist.note}"</p>
+                      <p className="text-slate-800 italic pt-0.5 leading-tight">"{hist.note}"</p>
                     )}
                   </div>
                 ))}
