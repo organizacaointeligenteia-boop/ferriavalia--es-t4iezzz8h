@@ -34,8 +34,7 @@ Todo o funcionamento é executado 100% no navegador (client-side) em memória Re
 - **Persistência em Memória (Volátil):** Ao recarregar a página (F5 ou refresh do navegador), todos os relatos cadastrados ou status alterados são descartados e retornam ao estado inicial. Há avisos visíveis em todas as telas sobre essa volatilidade.
 - **Painel Interno Sem Login:** O painel interno é acessível diretamente para avaliação da usabilidade e da máquina de estados, porém conta com banner de advertência explícito de que o ambiente é uma demonstração sem autenticação, sem dados reais e sem garantias técnicas de confidencialidade ou restrição de acesso.
 - **Mural Público Desativado:** A tela do Mural é uma prévia estritamente de demonstração com exemplos ilustrativos. O interruptor de ativação bloqueia o acionamento via modal ético, impossibilitando qualquer publicação.
-- **QR Code e URL Pública Pendentes:** Não foi inventado domínio público e o QR code está marcado como não operacional até decisão formal e confirmação de domínio homologado.
-
+- **QR Code Demonstrativo 100% Local (Sem Rede):** Gerador demonstrativo integrado na tela Mural (`/mural`), alimentado pela biblioteca npm `qrcode` (v1.5.4). A geração ocorre exclusivamente no navegador do usuário via `<canvas>`, sem contato com APIs de terceiros, Google Charts ou serviços externos. A URL padrão de teste é puramente sintética (`https://e2e-synth.example.invalid/coleta`), exigindo confirmação explícita antes de gerar, e o QR é acompanhado de avisos de destino não verificado e proibição de distribuição externa.
 ---
 
 ## 3. Testes e Validações Executados vs. Apenas Preparados
@@ -61,13 +60,32 @@ Todo o funcionamento é executado 100% no navegador (client-side) em memória Re
 ## 4. Pendências Declaradas de Infraestrutura e Governança
 
 1. **Asset do Logo / Armazenamento Local:** CONCLUÍDO. O PNG oficial do logo (437x101 px) com SHA256 `2711c1f8d0a92ad50243c5fbed441f5c94b8d4d9ec28c973cd08e2cb8af1caa0` e origem oficial `https://ferriferriadv.com.br/wp-content/uploads/2026/06/Logo-FerriFerri-horizontal.png` (data real 15/10/2026) foi salvo e incorporado como asset local em `src/assets/eb985729968371dc-01d7c.png`. O componente `FerriFerriLogo` foi atualizado para renderizá-lo com proporção 437:101, sem hotlinks ou chamadas de rede externas em runtime.
-2. **QR Code e URL Pública:** Pendente de homologação de domínio próprio pelo escritório. Nenhum domínio falso foi introduzido.
+2. **QR Code e URL Pública:** O gerador demonstrativo local foi entregue na seção QR da tela Mural (`/mural`). Contudo, a definição e implantação da URL real continuam pendentes de decisão expressa do responsável técnico e de aprovação dos requisitos de infraestrutura e segurança da informação. Nenhum domínio de produção foi inventado ou colocado em operação.
 3. **Revisão Ética OAB Obrigatória:** Toda veiculação externa de relatos de atendimento permanece estritamente bloqueada até deliberação do responsável técnico e parecer deontológico da OAB sobre o Provimento n.º 205/2021.
 4. **Segurança e Criptografia:** Em eventual transição para produção, será necessário implementar backend autenticado com 2FA, banco de dados isolado com criptografia em repouso e trilhas de auditoria imutáveis.
 
 ---
 
-## 5. Confirmação de Integridade
+## 5. Dependência Local Adicionada para Geração do QR Code
+
+Para viabilizar a geração do QR code estritamente local e sem dependência de serviços remotos em runtime:
+- **Pacote npm:** `qrcode` (`^1.5.4`)
+- **Tipagens TypeScript:** `@types/qrcode` (`^1.5.5`) em `devDependencies`
+- **Modo de Operação:** Totalmente client-side (`QRCode.toCanvas`). Não realiza chamadas de rede (`fetch`, HTTP ou WebSocket), não envia dados a serviços remotos (rejeição explícita de APIs tipo Google Chart) e não utiliza armazenamento persistente (`localStorage`, `sessionStorage`, `indexedDB`).
+- **Política de Validação da URL de Entrada:**
+  - Limite estrito de 512 caracteres;
+  - Campo começa inicialmente vazio (sem pré-definir domínio do escritório);
+  - Apenas protocolo HTTPS (`https://`) aceito; rejeição estrita de esquemas `http:`, `javascript:`, `data:`, etc.;
+  - Rejeição de credenciais embutidas (`user:pass@`), espaços e caracteres de controle ASCII;
+  - Validação puramente sintética local via `URL` do navegador, sem fetch, navegação ou ping;
+  - Exibição do texto exato codificado sem alterações, normalizações ou parâmetros adicionais;
+  - Checkbox de confirmação desmarcado por padrão;
+  - Edição do campo desmarca imediatamente a confirmação e descarta o QR gerado anterior;
+  - Tarjas explícitas de "DEMONSTRAÇÃO", "DESTINO NÃO VERIFICADO" e "NÃO DISTRIBUIR PARA CLIENTES". Sem botão de download.
+
+---
+
+## 6. Confirmação de Integridade
 
 - **Nenhum dado real foi coletado ou solicitado.**
 - **Nenhum serviço externo (Asaas, Stripe, IA, banco de dados ou redes) foi conectado.**
