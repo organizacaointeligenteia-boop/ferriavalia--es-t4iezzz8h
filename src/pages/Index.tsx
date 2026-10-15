@@ -171,8 +171,9 @@ export default function Index() {
               </div>
               <h3 className="font-bold text-base text-[#0A1F33]">Preencha apenas campos mínimos</h3>
               <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-                Todos os campos são opcionais. Compartilhe unicamente impressões gerais sobre a
-                urbanidade, pontualidade e clareza do atendimento.
+                Nome e relato são opcionais; a data da experiência é obrigatória. Compartilhe
+                unicamente impressões gerais sobre a urbanidade, pontualidade e clareza do
+                atendimento.
               </p>
             </div>
             <div className="text-[11px] font-semibold text-[#B3261E] bg-red-50 p-2 rounded border border-red-200">
@@ -210,7 +211,7 @@ export default function Index() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs sm:text-sm text-slate-800">
           <div className="space-y-2 p-4 bg-slate-50 rounded-md border border-slate-200">
-            <h3 className="font-bold text-[#0A1F33]">Protótipo em Memória ≠ Sem Autenticação</h3>
+            <h3 className="font-bold text-[#0A1F33]">Protótipo em memória e sem autenticação</h3>
             <p className="text-slate-600 leading-relaxed">
               O formulário é um canal de demonstração, sem autenticação e sem dados reais. Não há
               garantia técnica de proteção ou controle de acesso neste protótipo: nada é enviado ou
