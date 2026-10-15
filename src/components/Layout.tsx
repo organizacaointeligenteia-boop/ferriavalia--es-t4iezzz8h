@@ -196,12 +196,14 @@ export default function Layout() {
                 <div className="font-semibold text-white text-xs">
                   Relatos e Experiência do Cliente
                 </div>
-                <div className="text-[10px] text-slate-400">Canal confidencial de escuta</div>
+                <div className="text-[10px] text-slate-400">
+                  Canal de demonstração, sem dados reais
+                </div>
               </div>
             </div>
             <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold bg-[#C9A227]/15 text-[#E5C048] border border-[#C9A227]/30">
               <AlertTriangle className="w-3 h-3 text-[#C9A227]" />
-              DEMONSTRAÇÃO — sem envio de dados reais
+              DEMONSTRAÇÃO — sem autenticação nem dados reais
             </div>
           </div>
 
@@ -210,7 +212,7 @@ export default function Layout() {
               <strong className="text-[#E5C048]">Publicidade jurídica e ética:</strong> Publicação e
               divulgação desativadas, pendentes de revisão ética OAB e decisão do responsável.
             </p>
-            <p className="shrink-0 text-slate-400">Coleta privada ≠ Divulgação pública</p>
+            <p className="shrink-0 text-slate-400">Ambiente de demonstração ≠ Divulgação pública</p>
           </div>
 
           <div className="pt-2 text-[11px] text-slate-400 flex flex-wrap gap-x-4 gap-y-1">

@@ -44,8 +44,8 @@ export default function Index() {
         </h1>
 
         <p className="text-base sm:text-lg text-slate-600 leading-relaxed">
-          Espaço interno e confidencial para escuta voluntária dos clientes sobre a experiência de
-          acolhimento e atendimento do nosso escritório.
+          Espaço interno de demonstração, sem autenticação, para simulação de escuta voluntária
+          sobre a experiência de acolhimento e atendimento do escritório (sem dados reais).
         </p>
 
         {/* CTA Buttons */}
@@ -138,7 +138,8 @@ export default function Index() {
             Como Funciona o Canal de Experiência
           </h2>
           <p className="text-sm text-slate-600">
-            Processo transparente, facultativo e com proteção integral do sigilo profissional.
+            Processo facultativo de demonstração, sem autenticação; o sigilo profissional é dever
+            ético do escritório, e este protótipo não deve receber dados reais.
           </p>
         </div>
 
@@ -153,8 +154,8 @@ export default function Index() {
                 Acesse o formulário de experiência
               </h3>
               <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-                Leia o aviso prévio de privacidade e confirme voluntariamente o consentimento antes
-                de prosseguir para a área de escrita.
+                Leia o aviso de demonstração e confirme a participação simulada antes de prosseguir
+                para os campos do relato.
               </p>
             </div>
             <div className="text-[11px] text-[#0A1F33] bg-[#0A1F33]/5 p-2 rounded border border-[#C9A227]/30">
@@ -198,37 +199,39 @@ export default function Index() {
         </div>
       </section>
 
-      {/* 5. Seção de Privacidade e Sigilo */}
+      {/* 5. Seção de Diretrizes Éticas e Aviso de Demonstração */}
       <section className="bg-white rounded-lg p-6 sm:p-8 border border-slate-200 shadow-xs space-y-4">
         <div className="flex items-center gap-2.5 text-[#0A1F33]">
           <Lock className="w-5 h-5 text-[#C9A227]" />
           <h2 className="text-xl sm:text-2xl font-bold tracking-tight">
-            Privacidade e Sigilo Profissional
+            Diretrizes Éticas e Aviso de Demonstração
           </h2>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs sm:text-sm text-slate-800">
           <div className="space-y-2 p-4 bg-slate-50 rounded-md border border-slate-200">
-            <h3 className="font-bold text-[#0A1F33]">Coleta Privada ≠ Não Anônima</h3>
+            <h3 className="font-bold text-[#0A1F33]">Protótipo em Memória ≠ Sem Autenticação</h3>
             <p className="text-slate-600 leading-relaxed">
-              O formulário é um canal privado de acolhimento institucional, mas{' '}
-              <strong>não é prometido anonimato absoluto</strong>. A coleta visa à organização
-              interna do escritório para melhoria de procedimentos.
+              O formulário é um canal de demonstração, sem autenticação e sem dados reais. Não há
+              garantia técnica de proteção ou controle de acesso neste protótipo: nada é enviado ou
+              armazenado em servidores externos.
             </p>
           </div>
 
           <div className="space-y-2 p-4 bg-slate-50 rounded-md border border-slate-200">
             <h3 className="font-bold text-[#0A1F33]">Retirada a Qualquer Tempo</h3>
             <p className="text-slate-600 leading-relaxed">
-              O participante tem o direito de solicitar a exclusão ou retirada de seu registro a
-              qualquer momento. O painel interno conta com simulação específica para este fluxo.
+              O participante tem o direito ético de solicitar a exclusão ou retirada de qualquer
+              registro. O painel interno ilustra a simulação desse fluxo em memória.
             </p>
           </div>
         </div>
 
         <p className="text-xs text-slate-600 leading-relaxed pt-2">
           Não solicitamos nem armazenamos documentos, número de processo, CPF, senhas judiciais ou
-          detalhes de litígios. O sigilo entre advogado e cliente permanece resguardado por lei.
+          detalhes de litígios. O sigilo profissional é dever ético dos advogados nos termos da lei
+          e do CED/OAB; este protótipo, por ser puramente demonstrativo e sem autenticação, não deve
+          receber dados reais.
         </p>
       </section>
 

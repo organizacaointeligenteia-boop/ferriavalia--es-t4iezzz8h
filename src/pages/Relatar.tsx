@@ -154,21 +154,22 @@ export default function Relatar() {
             <div className="flex items-start gap-2 text-[#0A1F33]">
               <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5 text-[#C9A227]" />
               <div className="font-semibold text-sm">
-                Diretrizes de Segurança e Sigilo Profissional
+                Aviso de Demonstração e Dever Ético de Sigilo
               </div>
             </div>
             <p className="leading-relaxed text-slate-700 pl-6">
-              Este envio é <strong>voluntário</strong> e{' '}
-              <strong>não condiciona o atendimento</strong>. Em respeito ao dever ético de sigilo
-              (art. 35 do CED/OAB), orientamos expressamente:
+              Este formulário é de <strong>demonstração sem autenticação</strong> e{' '}
+              <strong>não condiciona o atendimento</strong>. O sigilo profissional é um dever ético
+              do escritório (art. 35 do CED/OAB). Como este protótipo não possui garantias técnicas
+              nem persistência externa, orientamos expressamente:
             </p>
             <div className="bg-white p-3 rounded border border-red-200 text-[#B3261E] font-medium text-xs pl-3">
               Não insira fatos do caso, números de processo, nomes de terceiros ou informações
-              sigilosas.
+              reais/sigilosas.
             </div>
             <p className="text-[11px] text-slate-500 pl-6">
-              A coleta é privada mas não estritamente anônima. Não solicitamos nem guardamos CPF ou
-              documentos pessoais.
+              Canal de demonstração sem autenticação. Não solicitamos nem guardamos CPF ou
+              documentos pessoais. Protótipo em memória; nada é enviado ou armazenado.
             </p>
           </div>
 
@@ -182,8 +183,8 @@ export default function Relatar() {
                 className="mt-1 h-4 w-4 rounded border-slate-300 text-[#0A1F33] focus:ring-[#C9A227] focus:ring-2 cursor-pointer"
               />
               <span className="text-xs sm:text-sm text-slate-800 group-hover:text-[#0A1F33] transition-colors leading-relaxed">
-                Li e compreendo o aviso de privacidade e concordo voluntariamente em enviar meu
-                relato de experiência.
+                Li e compreendo o aviso de demonstração (sem autenticação nem envio de dados reais)
+                e concordo em simular o relato.
               </span>
             </label>
             {!consentChecked && (

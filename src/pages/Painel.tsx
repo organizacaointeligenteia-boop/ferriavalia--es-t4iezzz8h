@@ -112,13 +112,13 @@ export default function Painel() {
           <AlertTriangle className="w-5 h-5 text-[#C9A227] shrink-0 mt-0.5" />
           <div className="space-y-1">
             <div className="font-bold text-sm tracking-tight text-[#0A1F33] uppercase">
-              PAINEL DE DEMONSTRAÇÃO — NÃO USE DADOS REAIS
+              PAINEL DE DEMONSTRAÇÃO — SEM AUTENTICAÇÃO E SEM DADOS REAIS
             </div>
             <p className="text-xs text-slate-700 leading-relaxed">
-              Sem autenticação real;{' '}
-              <strong>não é seguro para informações confidenciais ou reais</strong>. Este painel
-              ilustra exclusivamente a organização interna de relatos e a máquina de estados para
-              deliberação do responsável.
+              Espaço de demonstração sem autenticação e sem dados reais. Protótipo em memória;{' '}
+              <strong>não há garantia técnica de confidencialidade ou restrição de acesso</strong>.
+              Este painel ilustra exclusivamente a organização de relatos simulados e a máquina de
+              estados para deliberação do responsável.
             </p>
           </div>
         </div>
@@ -131,7 +131,7 @@ export default function Painel() {
             Painel Interno de Relatos — DEMO
           </h1>
           <p className="text-xs sm:text-sm text-slate-600">
-            Organização restrita para conferência de atendimento e registro de decisões humanas.
+            Demonstração de conferência de atendimento e registro simulado de decisões humanas.
           </p>
         </div>
 

@@ -73,7 +73,7 @@ export default function Mural() {
         <div className="flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0 text-[#C9A227]" />
           <span>
-            <strong>PRÉVIA FICTÍCIA E PRIVADA:</strong> O mural externo NÃO está ativo e não é
+            <strong>PRÉVIA FICTÍCIA DE DEMONSTRAÇÃO:</strong> O mural externo NÃO está ativo e não é
             público.
           </span>
         </div>
@@ -90,10 +90,10 @@ export default function Mural() {
             Visualização Interna Experimental
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold text-[#0A1F33] tracking-tight">
-            Mural — Prévia Fictícia e Privada
+            Mural — Prévia Fictícia de Demonstração
           </h1>
           <p className="text-xs sm:text-sm text-slate-600">
-            Exemplo visual de formato de relatos, rigorosamente restrito a amostras simuladas e
+            Exemplo visual de formato de relatos, restrito a amostras simuladas de demonstração e
             mantido inoperante.
           </p>
         </div>
