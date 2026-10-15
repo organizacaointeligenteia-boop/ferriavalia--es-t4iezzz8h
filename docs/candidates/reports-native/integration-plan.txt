@@ -1,0 +1,57 @@
+PLANO DE INTEGRAÇÃO DO HOOK NATIVO ÚNICO
+Projeto: Ferri & Ferri — Relatos e Experiência
+ID do Projeto: 9d1a62e7-f60e-4585-aecf-107d6a652a9d
+Data real de referência: 15/10/2026
+Status atual: CANDIDATO INATIVO (fora de autodiscovery)
+
+=============================================================================
+1. DIAGNÓSTICO DO PROBLEMA ATUAL (LOADER DUPLO E DUPLICAÇÃO DE ROTAS)
+=============================================================================
+Atualmente, existem dois arquivos no diretório pocketbase/hooks/:
+1. pocketbase/hooks/reports.js (288 linhas)
+2. pocketbase/hooks/reports.pb.js (311 linhas)
+
+Ambos registram a MESMA rota HTTP através de routerAdd('POST', '/backend/v1/reports', ...).
+No PocketBase / Goja, o autodiscovery carrega todos os arquivos *.js e *.pb.js dentro de
+pocketbase/hooks/. Isso causa:
+- Risco de sobreposição ou colisão no roteador interno da engine Go;
+- Comportamento indeterminado dependente da ordem alfabética de carregamento dos arquivos;
+- Desperdício de recursos de compilação da VM Goja.
+
+=============================================================================
+2. DIRETRIZES DE SEGURANÇA E PRESERVAÇÃO DE HISTÓRICO (GIT)
+=============================================================================
+- NÃO remover nem modificar os hooks ativos na rodada presente (fase de candidato inativo).
+- A integração física SÓ ocorrerá quando autorizada expressamente pelo responsável técnico (Fabrício)
+  e após aprovação de todos os gates de infraestrutura.
+- A remoção de pocketbase/hooks/reports.pb.js deve ser registrada no histórico do Git via 'git rm'
+  ou patch explícito, acompanhada pela atualização atômica de pocketbase/hooks/reports.js.
+- Garantia de que somente UMA rota final (POST /backend/v1/reports) existirá no sistema.
+
+=============================================================================
+3. SEQUÊNCIA DE APLICAÇÃO ATÔMICA DA INTEGRAÇÃO (MOMENTO FUTURO)
+=============================================================================
+Etapa 1: Validação prévia de gates
+  - Confirmar se o runtime Goja suporta Intl.DateTimeFormat com fuso America/Sao_Paulo
+    ou se a tabela de transições históricas deve ser compilada inline.
+  - Confirmar a disponibilidade de segredo de servidor para derivação de chaves de rate limit
+    (sem salvar IP bruto).
+  - Confirmar a execução prévia da migração de quota atômica (0002_create_rate_limit_quotas.js).
+
+Etapa 2: Atualização do arquivo principal de hook
+  - Copiar o conteúdo validado de docs/candidates/reports-native/reports-native-candidate.js.txt
+    para pocketbase/hooks/reports.js.
+  - Verificar que não há variáveis globais de estado de VM que possam vazar entre requisições.
+
+Etapa 3: Remoção segura do arquivo legado (eliminação do loader duplo)
+  - Deletar fisicamente o arquivo pocketbase/hooks/reports.pb.js.
+  - Conferir que não resta nenhum outro arquivo registrando rotas em /backend/v1/reports.
+
+Etapa 4: Deploy e verificação pós-integração
+  - Deploy no Skip Cloud via deploy_backend.
+  - Execução de teste de rota:
+    a) Envio de payload inválido -> 400 Bad Request;
+    b) Envio de payload sintético com idempotencyKey nova -> 201 Created;
+    c) Reenvio imediato com mesma idempotencyKey -> 201 Created canônico (sem criação duplicada);
+    d) Teste de exaustão de quota -> 429 rate_limited constante;
+    e) Verificação nos logs (list_logs) de que nenhum panic ou warning de rota duplicada foi emitido.

@@ -1,0 +1,164 @@
+/**
+ * CANDIDATO DE MIGRAÇÃO: COLEÇÃO DE QUOTA E RATE LIMITING ATÔMICO
+ * Arquivo: docs/candidates/reports-native/migration-quota.txt
+ * Projeto: Ferri & Ferri — Relatos e Experiência
+ * ID do Projeto: 9d1a62e7-f60e-4585-aecf-107d6a652a9d
+ * Data real de referência: 15/10/2026
+ *
+ * ATENÇÃO DE SEGURANÇA E GOVERNANÇA:
+ * 1. Este arquivo é estritamente um TEXTO (.txt) mantido fora de pocketbase/migrations/
+ *    para NÃO ser executado nem autodescoberto pelo PocketBase.
+ * 2. NENHUMA migração real é criada nesta rodada.
+ * 3. O modelo aqui especificado adota:
+ *    - CHAVE DERIVADA (derived_key): NUNCA salva IP bruto nem dados do cliente.
+ *      Formada por HMAC-SHA256(client_ip, $secrets.get('RATE_LIMIT_PEPPER')) + janela de tempo.
+ *      Um hash simples sem segredo NÃO é anonimização (LGPD/segurança).
+ *    - CONTABILIZAÇÃO DE TENTATIVAS: A quota conta toda tentativa recebida pelo endpoint,
+ *      seja ela bem-sucedida, rejeitada ou duplicada, prevenindo DoS e brute-force.
+ *    - RESERVA ATÔMICA: Baseada em índice UNIQUE (derived_key, window_slot) com controle
+ *      de contagem (attempts_count) e bloqueio atômico via UPDATE/INSERT transacional no SQLite.
+ *    - DEFAULT-DENY / FAIL-CLOSED: Qualquer falha na leitura ou escrita da tabela de quota
+ *      resulta na negação sumária da requisição com HTTP 429 rate_limited constante.
+ */
+
+/*
+CONTEÚDO DA MIGRAÇÃO QUANDO AUTORIZADA PARA pocketbase/migrations/0002_create_rate_limit_quotas.js:
+
+migrate(
+  (app) => {
+    if (app.hasTable('rate_limit_quotas')) {
+      return
+    }
+
+    const collection = new Collection({
+      name: 'rate_limit_quotas',
+      type: 'base',
+      // Regras de acesso: estritamente privadas por padrão (null = somente motor interno/hooks)
+      listRule: null,
+      viewRule: null,
+      createRule: null,
+      updateRule: null,
+      deleteRule: null,
+      fields: [
+        {
+          name: 'derived_key',
+          type: 'text',
+          required: true,
+          min: 32,
+          max: 128,
+        },
+        {
+          name: 'window_slot',
+          type: 'text',
+          required: true,
+          min: 10,
+          max: 30,
+        },
+        {
+          name: 'attempts_count',
+          type: 'number',
+          required: true,
+          onlyInt: true,
+          min: 0,
+          max: 1000000,
+        },
+        {
+          name: 'last_attempt_at',
+          type: 'text',
+          required: true,
+          max: 40,
+        },
+        {
+          name: 'expires_at_epoch',
+          type: 'number',
+          required: true,
+          onlyInt: true,
+        },
+        {
+          name: 'created',
+          type: 'autodate',
+          onCreate: true,
+          onUpdate: false,
+        },
+        {
+          name: 'updated',
+          type: 'autodate',
+          onCreate: true,
+          onUpdate: true,
+        },
+      ],
+      indexes: [
+        // Índice único composto garantindo reserva e controle atômico por slot temporal
+        'CREATE UNIQUE INDEX idx_quota_derived_slot ON rate_limit_quotas (derived_key, window_slot)',
+        'CREATE INDEX idx_quota_expires ON rate_limit_quotas (expires_at_epoch)',
+      ],
+    })
+
+    app.save(collection)
+  },
+  (app) => {
+    try {
+      const collection = app.findCollectionByNameOrId('rate_limit_quotas')
+      app.delete(collection)
+    } catch (_) {}
+  }
+)
+*/
+
+=============================================================================
+ALGORITMO DE RESERVA ATÔMICA PREVISTO NO HOOK:
+=============================================================================
+/*
+function reserveAtomicAttempt(app, clientIp) {
+  var pepper = $secrets.get('RATE_LIMIT_PEPPER');
+  if (!pepper || pepper.length < 16) {
+    // GATE: segredo de rate limit ausente -> nega fail-closed
+    return false;
+  }
+
+  // 1. Derivação segura da chave (HMAC-SHA256)
+  var derivedKey = $security.hs256(clientIp, pepper);
+
+  // 2. Cálculo do slot de janela (janela de 60 segundos)
+  var nowMs = Date.now();
+  var windowDurationMs = 60000;
+  var slotIndex = Math.floor(nowMs / windowDurationMs);
+  var windowSlot = 'slot_' + slotIndex;
+  var expiresAtEpoch = Math.floor((nowMs + windowDurationMs * 2) / 1000);
+
+  // 3. Execução transacional de upsert e incremento de tentativa
+  var allowed = false;
+  app.runInTransaction(function (txApp) {
+    var query = txApp.db().newQuery(
+      "INSERT INTO rate_limit_quotas (id, derived_key, window_slot, attempts_count, last_attempt_at, expires_at_epoch, created, updated) " +
+      "VALUES ({:id}, {:key}, {:slot}, 1, {:now}, {:exp}, datetime('now'), datetime('now')) " +
+      "ON CONFLICT(derived_key, window_slot) DO UPDATE SET " +
+      "attempts_count = rate_limit_quotas.attempts_count + 1, " +
+      "last_attempt_at = {:now}, " +
+      "updated = datetime('now')"
+    ).bind({
+      id: $security.randomString(15),
+      key: derivedKey,
+      slot: windowSlot,
+      now: new Date().toISOString(),
+      exp: expiresAtEpoch
+    });
+
+    query.execute();
+
+    // 4. Checagem atômica do valor incrementado
+    var record = txApp.findFirstRecordByFilter(
+      'rate_limit_quotas',
+      "derived_key = '" + derivedKey + "' && window_slot = '" + windowSlot + "'"
+    );
+
+    if (record && record.getInt('attempts_count') <= 10) {
+      allowed = true;
+    } else {
+      allowed = false;
+    }
+  });
+
+  return allowed;
+}
+*/

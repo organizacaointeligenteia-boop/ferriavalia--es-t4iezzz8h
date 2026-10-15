@@ -85,38 +85,52 @@ Para viabilizar a geração do QR code estritamente local e sem dependência de 
 
 ---
 
-## 6. Auditoria de Prontidão e Limites de Segurança (Consolidação das 4 Correções Internas)
+## 6. Auditoria de Prontidão e Limites de Segurança (Rodada Consolidada de Candidato Inativo)
 
-Esta seção documenta o estado estrito de prontidão técnica, de governança e de segurança dos módulos candidatos após a rodada consolidada de correções internas:
+Esta seção documenta com rigor auditável o estado técnico, de governança e de segurança dos módulos candidatos após a auditoria das 20:17 e a criação do snapshot candidato inativo em `docs/candidates/reports-native/`:
 
-1. **Idempotência Canônica sem Metadados:**
+1. **Snapshot Candidato Inativo e Isolamento de Autodiscovery:**
+   - O candidato corrigido reside exclusivamente em `docs/candidates/reports-native/reports-native-candidate.js.txt`.
+   - O plano de integração está em `docs/candidates/reports-native/integration-plan.txt`.
+   - A especificação da tabela de quotas está em `docs/candidates/reports-native/migration-quota.txt`.
+   - Todos foram gravados com extensão `.txt` FORA das pastas `pocketbase/hooks/` e `pocketbase/migrations/` para garantir **ZERO autodiscovery** pelo runtime Goja do Skip Cloud.
+   - **Nenhum hook ativo foi alterado ou removido**. A remoção do loader duplo (`pocketbase/hooks/reports.pb.js`) está documentada no plano para o momento da integração autorizada.
+
+2. **Idempotência Canônica sem Metadados e Reconsulta Mandatória pós-UNIQUE:**
    - Aceite inicial e replay por chave repetida devolvem rigorosamente o **MESMO status HTTP (201 Created)** e o **MESMO corpo público canônico**: `{ success: true, received: true }`.
-   - Removida toda flag de replay (`idempotencyStatus: 'IDEMPOTENT_REPLAY'`), sem `reportId`, sem estado interno e sem `receivedAt`/data no corpo público.
-   - Tratamento seguro de colisão atômica concorrente (ex.: violação de constraint única em inserção paralela com a mesma chave) devolvendo o mesmo corpo canônico idêntico, prevenindo vazamento de temporização e de metadados.
+   - Removida toda flag de replay, sem `reportId`, sem estado interno e sem data/hora no corpo público.
+   - **Correção Crítica pós-Catch de UNIQUE**: Erro genérico de `UNIQUE constraint` **NÃO AUTORIZA 201**. No catch, o handler só devolve o 201 canônico **DEPOIS de reconsultar o armazenamento e confirmar que existe registro com a MESMA `idempotency_key`**. Se a verificação falhar (registro não localizado ou falha de leitura I/O), devolve erro constante `{ success: false, error: 'internal_error' }` com status 500, prevenindo falsos positivos de sucesso.
 
-2. **Rate Limiter com Default-Deny Efetivo e Erro Constante:**
-   - Limiter AUSENTE (`null`/`undefined`), que LANÇA exceção ou que retorna valor MALFORMADO (objeto inválido, sem campo boolean `allowed` ou `allowed !== true`) é sumariamente **NEGADO ANTES de qualquer escrita/insert no banco**.
-   - Erro público **CONSTANTE** (`{ success: false, error: 'rate_limited' }`, status 429), sem expor `reason`, contadores ou qualquer detalhe interno de infraestrutura.
+3. **Tratamento de Payload Bruto e Consentimento Estrito:**
+   - Extração do corpo sem fallback permissivo `|| {}`;
+   - Rejeição estrita com HTTP 400 de arrays (`Array.isArray`), valores nulos (`null`/`undefined`) e primitivos não-objeto antes de acessar qualquer propriedade;
+   - `consentGiven` deve ser **estritamente `true`** (rejeita booleanos `false`, ausentes e strings/números coercivos);
+   - `termsVersion` deve pertencer obrigatoriamente a uma lista explícita e imutável de versões auditadas (`v1.0-2025`, `v1.0-2026`, `v1.1-2026`), rejeitando versões arbitrárias.
 
-3. **Gate de Equipe (Staff) com Identidade Comprovada Não-Vazia:**
-   - Verificador de equipe com default-deny estrito: nega exceções (fail-closed) e retornos malformados com erro constante `access_denied`.
-   - **Exigência mandatória de identidade comprovada NÃO-VAZIA**: `"authenticated"` genérico, strings em branco e meros domínios de e-mail (ex.: `@ferriferriadv.com.br`) ou endereços de e-mail puros **NÃO BASTAM** e são sumariamente recusados como prova de staff. Exige identificador de membro auditável.
+4. **Calendário Estrito e Declaração de Gate de Fuso Horário (Goja / IANA):**
+   - Validação de calendário gregoriano estrito (rejeita 29 de fevereiro em anos não-bissextos como 2025 e 31 de abril);
+   - Rejeição de datas futuras em relação ao horário corrente civil de São Paulo;
+   - **Declaração Formal de Gate de Fuso**: O runtime Goja (motor ECMAScript em Go do PocketBase) não oferece garantia nativa comprovada de suporte completo a `Intl.DateTimeFormat` com fuso IANA `America/Sao_Paulo`. O candidato testa `Intl` defensivamente e declara nos comentários e documentação as duas alternativas: (A) Intl nativo comprovado pelo host Goja; (B) Tabela de transições de Horário de Verão pré-2019. **Não se finge que Intl está garantido, nem se impõe UTC-3 civil fixo como regra histórica perene**. O gate permanece declarado até validação no host.
 
-4. **UUID Validado Idêntico ao Persistido e Rejeição de Espaços:**
-   - O valor UUID validado pelo validador RFC 4122 v4 é **EXATAMENTE o mesmo persistido no insert** (garantia de variável única validada, sem recriação ou substituição posterior).
-   - Rejeição estrita de qualquer espaço: se contiver espaço em qualquer posição (início, meio ou fim), o valor é **INVÁLIDO** (sem trim permissivo seguido de persistência de valor não-sanitizado).
-   - Preservação da política **fail-closed** quando a Web Crypto API estiver indisponível (lança erro explícito, zero fallback constante).
+5. **Rate Limiting Fail-Closed e Quota de Tentativas (Sem IP Bruto):**
+   - Limiter opera com política estrita default-deny (fail-closed): se a checagem falhar por indisponibilidade ou erro de banco, a requisição é sumariamente negada com HTTP 429 `{ success: false, error: 'rate_limited' }`;
+   - Fica documentado que a quota temporária atual conta relatos gravados e é global;
+   - No candidato e na especificação `migration-quota.txt`, está projetado o algoritmo de reserva atômica por slot de janela contando **TENTATIVAS** (e não apenas sucessos);
+   - **GATES CONCRETOS DE INFRAESTRUTURA**: NUNCA salvar IP bruto; NUNCA chamar hash simples sem segredo de "anonimização" (LGPD); a definição da fonte confiável de IP pelo proxy reverso (ingress), o segredo de servidor para HMAC (`$secrets.get('RATE_LIMIT_PEPPER')`) e a política de expiração são **GATES PENDENTES**. Não se inventa segredo em código.
 
-5. **SQL PostgreSQL Genérico Arquivado (NÃO APLICÁVEL ao Motor Real):**
-   - Os arquivos SQL legados (`schema-draft.sql` e `security-rules-draft.sql`) representam SQL PostgreSQL genérico arquivado **NÃO COMPATÍVEL / NÃO APLICÁVEL** ao motor real da plataforma Skip Cloud (que adota SQLite dedicado por projeto).
-   - **Nenhum novo SQL PostgreSQL genérico foi gerado**. Nenhuma migração ou função de banco foi criada ou aplicada.
-
-6. **Adapter e Endpoint Continuam Mocks Puros em Memória:**
-   - O endpoint e a camada de persistência utilizam a interface em memória `MockDatabaseClient` (`src/lib/serverReportEndpointDraft.ts`), sem qualquer conexão a bancos reais, sem SDK de banco, sem Supabase e sem Skip Cloud.
+6. **Governança de Equipe (Staff) e Regras da Coleção `users` (Vazio vs Null):**
+   - **Staff AUSENTE**: Tratado estritamente como **NÃO IMPLEMENTADO** nesta fase. Não se finge que o painel possui autenticação de equipe real.
+   - **Distinção Crítica de Regras de Acesso no PocketBase (`""` vs `null`):**
+     - Uma regra com valor `""` (string vazia) significa **ACESSO PÚBLICO IRRESTRITO** (qualquer requisição anônima é autorizada);
+     - Uma regra com valor `null` significa **ACESSO SUPERUSER/HOOKS INTERNOS APENAS** (requisições de API são sumariamente bloqueadas).
+     - **AVISO DE AUDITORIA:** No arquivo `src/lib/pocketbase/schema.json`, a coleção `users` exibe `"create": ""`. NÃO se deve afirmar levianamente que criação está negada quando o JSON literal contém string vazia (`""`). Além disso, as regras `manageRule` e `authRule` do PocketBase e as credenciais de usuários reais **NÃO FORAM CONSULTADAS NEM ALTERADAS** nesta rodada, preservando estritamente a segurança e o sigilo de contas e tokens.
+   - As regras da coleção `reports` permanecem 100% privadas (`listRule: null`, `viewRule: null`, `createRule: null`, `updateRule: null`, `deleteRule: null`).
 
 7. **Testes Sintéticos: Distinção Explícita de Executados vs. Preparados:**
-   - **EXECUTADOS:** Apenas o pipeline estático da plataforma (`oxlint`, `tsc`, `vite build`).
-   - **PREPARADOS / NÃO EXECUTADOS:** A suíte de testes sintéticos unitários em memória (`src/lib/syntheticTestsRunner.ts`), disponibilizada integralmente em código auditável e independente de rede, cobrindo todos os caminhos das 4 correções.
+   - **EXECUTADOS:** O pipeline estático da plataforma (`oxlint`, `tsc`, `vite build`).
+   - **PREPARADOS / NÃO EXECUTADOS EM CI AUTOMÁTICO:**
+     1. Suíte TypeScript em memória de modelos conceituais (`src/lib/nativeSyntheticTestsRunner.ts`);
+     2. **NOVA Suíte Direta no Código-Fonte do Candidato** (`src/lib/candidateHookSyntheticTestsRunner.ts`): Lê o arquivo físico `reports-native-candidate.js.txt`, injeta harness isolado com mocks de `routerAdd`/`e`/`e.app`/`Record` em Node.js (distinguindo explicitamente: ambiente Node.js mockado vs motor Goja vs runtime de produção) e exercita: payload array/null/primitivo rejeitado; consent false/ausente; terms_version inválida; 29fev/31abr/futuro rejeitados; UNIQUE com registro confirmado -> 201 canônico; UNIQUE sem registro confirmado -> 500 erro constante; limiter fail-closed.
 
 8. **Ausência de Integração e Bloqueio de Publicação / QR de Placa:**
    - **NÃO declarar integração pronta.** Nenhuma integração com serviços externos ou nuvem existe. O sistema NÃO está apto a dados reais.

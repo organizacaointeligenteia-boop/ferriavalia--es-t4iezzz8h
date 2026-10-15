@@ -1,0 +1,441 @@
+/**
+ * CANDIDATO NATIVO EXCLUSIVO (CORRIGIDO) — Endpoint de Criação de Relatos
+ * Arquivo: docs/candidates/reports-native/reports-native-candidate.js.txt
+ * Rota pretendida: POST /backend/v1/reports
+ * Projeto: Ferri & Ferri — Relatos e Experiência
+ * ID do Projeto: 9d1a62e7-f60e-4585-aecf-107d6a652a9d
+ * Data real de registro: 15/10/2026
+ *
+ * ATENÇÃO DE SEGURANÇA E GOVERNANÇA:
+ * 1. Este arquivo é um SNAPSHOT CANDIDATO mantido como .txt fora de pocketbase/hooks
+ *    para não sofrer autodiscovery/deploy automático pelo runtime Goja do Skip Cloud.
+ * 2. Somente UMA rota final deve ser registrada (POST /backend/v1/reports).
+ *    Na integração, o arquivo duplicado pocketbase/hooks/reports.pb.js e a versão
+ *    anterior de pocketbase/hooks/reports.js devem ser consolidados em um único arquivo.
+ * 3. GATES DECLARADOS NESTE ARQUIVO (NÃO ULTRAPASSADOS):
+ *    - GATE DE TIMEZONE: O runtime Goja (motor ECMAScript em Go do PocketBase) NÃO
+ *      possui garantia nativa de implementação completa de Intl.DateTimeFormat com fuso IANA
+ *      arbitrário sem flag específica em Go. Declaramos duas alternativas:
+ *      (A) Intl comprovado em Goja com timeZone: 'America/Sao_Paulo';
+ *      (B) Tabela histórica de transições de Horário de Verão do Brasil (Decretos Federais).
+ *      Se nenhuma for comprovada no host, opera-se sob o GATE DE FUSO declarado,
+ *      sem fingir conformidade histórica nem impor UTC-3 civil fixo como regra perene.
+ *    - GATE DE RATE LIMITING: O rate limiter atual é fail-closed, mas opera com contagem
+ *      global/por chave derivada. Fontes de IP confiáveis (cabeçalhos de proxy do ingress),
+ *      HMAC com segredo gerenciado e política de retenção de janelas são GATES. Não se inventa
+ *      segredo em código e não se armazena IP bruto nem hash simples ("anonimização ilusória").
+ *    - GATE DE STAFF: O acesso à listagem e administração de relatos continua stritamente privado
+ *      (listRule/viewRule = null). Usuários genéricos autenticados (@request.auth.id != '') e
+ *      domínios de e-mail puros NÃO possuem autorização de equipe.
+ */
+
+// Lista explícita e imutável de versões de termos aceitas pelo cartório ético do escritório
+var ALLOWED_TERMS_VERSIONS = [
+  'v1.0-2025',
+  'v1.0-2026',
+  'v1.1-2026'
+];
+
+routerAdd('POST', '/backend/v1/reports', function (e) {
+  // =========================================================================
+  // 1. RATE LIMITER COM GATE DEFAULT-DENY (FAIL-CLOSED)
+  // =========================================================================
+  // Documentação de Quota e Contrato:
+  // A quota atual implementada nesta camada de transição conta relatos gravados ou tentativas
+  // de forma fail-closed. Se qualquer checagem falhar, o acesso é sumariamente negado com 429.
+  // GATES CONCRETOS PENDENTES PARA LIMITER DEFINITIVO:
+  // - Fonte confiável de IP de cliente (X-Forwarded-For vs CF-Connecting-IP vs e.realIP()):
+  //   requer definição pela infraestrutura do proxy reverso de borda.
+  // - HMAC com segredo do servidor ($secrets.get('RATE_LIMIT_PEPPER')) para hash seguro;
+  //   NUNCA armazenar IP bruto e NUNCA considerar SHA-256 sem sal como anonimização válida (LGPD).
+  // - Tabela dedicada de quota de tentativas (ver migration-quota.txt).
+  try {
+    var rawIp = e.realIP() || e.remoteIP();
+    if (!rawIp || typeof rawIp !== 'string' || rawIp.trim().length === 0) {
+      return e.json(429, {
+        success: false,
+        error: 'rate_limited'
+      });
+    }
+
+    // Janela temporal: 60 segundos
+    var oneMinuteAgo = new Date(Date.now() - 60000).toISOString().replace('T', ' ').substring(0, 19);
+    
+    // Consulta fail-closed: se a coleção de tentativas/reports falhar, nega imediatamente
+    var recentRecords = e.app.findRecordsByFilter(
+      'reports',
+      'created >= {:since}',
+      '-created',
+      10,
+      0,
+      { since: oneMinuteAgo }
+    );
+
+    // Teto de 10 requisições por minuto na janela
+    if (recentRecords && recentRecords.length >= 10) {
+      return e.json(429, {
+        success: false,
+        error: 'rate_limited'
+      });
+    }
+  } catch (_) {
+    // Fail-closed absoluto: indisponibilidade da verificação bloqueia a escrita
+    return e.json(429, {
+      success: false,
+      error: 'rate_limited'
+    });
+  }
+
+  // =========================================================================
+  // 2. EXTRAÇÃO E HIGIENIZAÇÃO ESTRITA DO PAYLOAD BRUTO
+  // =========================================================================
+  // O payload bruto deve ser um objeto JSON não-nulo e não-array.
+  // Rejeição estrita de arrays, primitivos e ausência de corpo antes de acessar qualquer propriedade.
+  var rawBody = null;
+  try {
+    var reqInfo = e.requestInfo();
+    rawBody = reqInfo ? reqInfo.body : null;
+  } catch (_) {
+    rawBody = null;
+  }
+
+  if (
+    rawBody === null ||
+    rawBody === undefined ||
+    typeof rawBody !== 'object' ||
+    Array.isArray(rawBody)
+  ) {
+    return e.json(400, {
+      success: false,
+      error: 'Payload inválido. Esperado objeto JSON não-nulo.'
+    });
+  }
+
+  var idempotencyKey = rawBody.idempotencyKey;
+  var consentGiven = rawBody.consentGiven;
+  var termsVersion = rawBody.termsVersion;
+  var experienceDate = rawBody.experienceDate;
+  var clientName = rawBody.clientName;
+  var relato = rawBody.relato;
+
+  var validationErrors = [];
+
+  // --- Validação estrita de idempotencyKey (obrigatória, 8 a 128 chars, string) ---
+  var cleanIdempotencyKey = null;
+  if (typeof idempotencyKey !== 'string' || idempotencyKey.trim().length === 0) {
+    validationErrors.push({
+      field: 'idempotencyKey',
+      message: 'Chave de idempotência é obrigatória e deve ser texto não-vazio.'
+    });
+  } else {
+    var trimmedKey = idempotencyKey.trim();
+    if (trimmedKey.length < 8 || trimmedKey.length > 128) {
+      validationErrors.push({
+        field: 'idempotencyKey',
+        message: 'Chave de idempotência deve ter entre 8 e 128 caracteres.'
+      });
+    } else {
+      cleanIdempotencyKey = trimmedKey;
+    }
+  }
+
+  // --- Validação estrita de consentGiven (booleano estrito true, sem coerção) ---
+  if (consentGiven !== true) {
+    validationErrors.push({
+      field: 'consentGiven',
+      message: 'Consentimento voluntário e prévio é obrigatório (deve ser estritamente true).'
+    });
+  }
+
+  // --- Validação estrita de termsVersion (pertencente à lista oficial permitida) ---
+  var cleanTermsVersion = null;
+  if (typeof termsVersion !== 'string' || termsVersion.trim().length === 0) {
+    validationErrors.push({
+      field: 'termsVersion',
+      message: 'Versão dos termos é obrigatória.'
+    });
+  } else {
+    var trimmedTerms = termsVersion.trim();
+    var isAllowedTerms = false;
+    for (var i = 0; i < ALLOWED_TERMS_VERSIONS.length; i++) {
+      if (ALLOWED_TERMS_VERSIONS[i] === trimmedTerms) {
+        isAllowedTerms = true;
+        break;
+      }
+    }
+    if (!isAllowedTerms) {
+      validationErrors.push({
+        field: 'termsVersion',
+        message: 'Versão dos termos não reconhecida ou descontinuada pelo escritório.'
+      });
+    } else {
+      cleanTermsVersion = trimmedTerms;
+    }
+  }
+
+  // --- Validação de clientName (opcional, máx 80 caracteres) ---
+  var cleanName = null;
+  if (clientName !== undefined && clientName !== null) {
+    if (typeof clientName !== 'string') {
+      validationErrors.push({
+        field: 'clientName',
+        message: 'Nome do cliente deve ser texto.'
+      });
+    } else {
+      var trimmedName = clientName.trim();
+      if (trimmedName.length > 80) {
+        validationErrors.push({
+          field: 'clientName',
+          message: 'Nome do cliente não pode exceder 80 caracteres.'
+        });
+      } else if (trimmedName.length > 0) {
+        cleanName = trimmedName;
+      }
+    }
+  }
+
+  // --- Validação de relato (opcional, máx 2000 caracteres) ---
+  var cleanRelato = null;
+  if (relato !== undefined && relato !== null) {
+    if (typeof relato !== 'string') {
+      validationErrors.push({
+        field: 'relato',
+        message: 'Relato deve ser texto.'
+      });
+    } else {
+      var trimmedRelato = relato.trim();
+      if (trimmedRelato.length > 2000) {
+        validationErrors.push({
+          field: 'relato',
+          message: 'Relato não pode exceder 2.000 caracteres.'
+        });
+      } else if (trimmedRelato.length > 0) {
+        cleanRelato = trimmedRelato;
+      }
+    }
+  }
+
+  // =========================================================================
+  // 3. VALIDAÇÃO DE CALENDÁRIO GREGORIANO E FUSO IANA (AMERICA/SAO_PAULO)
+  // =========================================================================
+  // DOCUMENTAÇÃO DO GATE DE FUSO HORÁRIO EM RUNTIME GOJA:
+  // - O fuso IANA 'America/Sao_Paulo' observou Horário de Verão (UTC-2) até 2019
+  //   (revogado pelo Decreto Federal nº 9.772/2019, passando a UTC-3 perene desde então).
+  // - Alternativa 1: Suporte pleno a Intl.DateTimeFormat com timeZone 'America/Sao_Paulo'
+  //   se compilado com suporte a timezones na engine Goja do Go host.
+  // - Alternativa 2: Tabela de transições históricas codificada para datas anteriores a 2019.
+  // - DECISÃO DO GATE: Testamos em runtime a disponibilidade de Intl com IANA;
+  //   se não for suportado com fidelidade comprovada pelo host Goja, declaramos GATE DE FUSO.
+  //   Para datas de experiência a partir de 2020 até o presente, o fuso oficial civil é UTC-3.
+  var cleanExperienceDate = null;
+  if (typeof experienceDate !== 'string' || experienceDate.trim().length === 0) {
+    validationErrors.push({
+      field: 'experienceDate',
+      message: 'Data da experiência é obrigatória.'
+    });
+  } else {
+    var trimmedDate = experienceDate.trim();
+    var dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmedDate);
+    if (!dateMatch) {
+      validationErrors.push({
+        field: 'experienceDate',
+        message: 'Formato de data inválido. Utilize o formato canônico AAAA-MM-DD.'
+      });
+    } else {
+      var expYear = parseInt(dateMatch[1], 10);
+      var expMonth = parseInt(dateMatch[2], 10);
+      var expDay = parseInt(dateMatch[3], 10);
+
+      var isLeap = (expYear % 4 === 0 && expYear % 100 !== 0) || expYear % 400 === 0;
+      var daysInMonth = [31, isLeap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+      if (expYear < 1900 || expYear > 2100 || expMonth < 1 || expMonth > 12) {
+        validationErrors.push({
+          field: 'experienceDate',
+          message: 'Mês ou ano fora do intervalo gregoriano admitido (1900-2100).'
+        });
+      } else {
+        var maxAllowedDay = daysInMonth[expMonth - 1];
+        if (expDay < 1 || expDay > maxAllowedDay) {
+          validationErrors.push({
+            field: 'experienceDate',
+            message: 'Dia inválido para o mês e ano informados (ex.: 29 de fevereiro em ano não-bissexto ou 31 em mês de 30 dias).'
+          });
+        } else {
+          // Determinação da data corrente civil em America/Sao_Paulo
+          // Avaliação do GATE DE INTL no runtime:
+          var todaySpString = '';
+          var intlSupported = false;
+          try {
+            if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+              var dtf = new Intl.DateTimeFormat('en-CA', {
+                timeZone: 'America/Sao_Paulo',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit'
+              });
+              var parts = dtf.format(new Date());
+              // en-CA produz formato YYYY-MM-DD
+              if (/^\d{4}-\d{2}-\d{2}$/.test(parts)) {
+                todaySpString = parts;
+                intlSupported = true;
+              }
+            }
+          } catch (_) {
+            intlSupported = false;
+          }
+
+          // Se Intl com America/Sao_Paulo não estiver disponível no motor Goja:
+          // Adota-se o cálculo civil com base no fuso oficial vigente (UTC-3, pós-Decreto 9.772/2019)
+          // marcando nos comentários técnicos que se trata de contingência do GATE DE RUNTIME GOJA.
+          if (!todaySpString) {
+            var nowUtc = new Date();
+            var spOffsetMinutes = -3 * 60;
+            var utcTime = nowUtc.getTime() + nowUtc.getTimezoneOffset() * 60000;
+            var spLocalDate = new Date(utcTime + spOffsetMinutes * 60000);
+            var yStr = String(spLocalDate.getFullYear());
+            var mStr = String(spLocalDate.getMonth() + 1);
+            if (mStr.length < 2) mStr = '0' + mStr;
+            var dStr = String(spLocalDate.getDate());
+            if (dStr.length < 2) dStr = '0' + dStr;
+            todaySpString = yStr + '-' + mStr + '-' + dStr;
+          }
+
+          if (trimmedDate > todaySpString) {
+            validationErrors.push({
+              field: 'experienceDate',
+              message: 'A data da experiência não pode ser futura em relação ao calendário corrente de São Paulo (America/Sao_Paulo).'
+            });
+          } else {
+            cleanExperienceDate = trimmedDate;
+          }
+        }
+      }
+    }
+  }
+
+  // Se houver qualquer erro de validação, responde 400 estruturado
+  if (validationErrors.length > 0) {
+    return e.json(400, {
+      success: false,
+      error: 'Falha na validação dos dados enviados.',
+      errors: validationErrors
+    });
+  }
+
+  // =========================================================================
+  // 4. VERIFICAÇÃO PREVENTIVA DE IDEMPOTÊNCIA CANÔNICA
+  // =========================================================================
+  // Se a chave já existir, retorna o MESMO status 201 e o MESMO corpo canônico
+  // { success: true, received: true }, sem expor nenhum metadado interno (id, status, timestamps).
+  try {
+    var existingRecord = e.app.findFirstRecordByData('reports', 'idempotency_key', cleanIdempotencyKey);
+    if (existingRecord) {
+      return e.json(201, {
+        success: true,
+        received: true
+      });
+    }
+  } catch (_) {
+    // findFirstRecordByData lança erro quando o registro não existe; prossegue para insert
+  }
+
+  // =========================================================================
+  // 5. FORMATAÇÃO DO TIMESTAMP DE AUDITORIA (AMERICA/SAO_PAULO)
+  // =========================================================================
+  var formattedReceivedAtSp = '';
+  try {
+    if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+      var dtfAudit = new Intl.DateTimeFormat('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
+      formattedReceivedAtSp = dtfAudit.format(new Date()) + ' (America/Sao_Paulo)';
+    }
+  } catch (_) {
+    formattedReceivedAtSp = '';
+  }
+
+  if (!formattedReceivedAtSp) {
+    var nowTs = new Date();
+    var spMinutes = -3 * 60;
+    var utcTs = nowTs.getTime() + nowTs.getTimezoneOffset() * 60000;
+    var spTsDate = new Date(utcTs + spMinutes * 60000);
+    var pad = function (n) { return n < 10 ? '0' + n : String(n); };
+    formattedReceivedAtSp =
+      pad(spTsDate.getDate()) +
+      '/' +
+      pad(spTsDate.getMonth() + 1) +
+      '/' +
+      spTsDate.getFullYear() +
+      ' às ' +
+      pad(spTsDate.getHours()) +
+      ':' +
+      pad(spTsDate.getMinutes()) +
+      ' (America/Sao_Paulo)';
+  }
+
+  // =========================================================================
+  // 6. INSERÇÃO ATÔMICA E TRATAMENTO SEGURO DE CONFLITO UNIQUE
+  // =========================================================================
+  try {
+    var reportsCollection = e.app.findCollectionByNameOrId('reports');
+    var newRecord = new Record(reportsCollection);
+
+    newRecord.set('idempotency_key', cleanIdempotencyKey);
+    newRecord.set('client_name', cleanName);
+    newRecord.set('relato', cleanRelato);
+    newRecord.set('experience_date', cleanExperienceDate);
+    newRecord.set('consent_given', true);
+    newRecord.set('terms_version', cleanTermsVersion);
+    newRecord.set('status', 'recebido');
+    newRecord.set('received_at_sp', formattedReceivedAtSp);
+    newRecord.set(
+      'audit_history',
+      JSON.stringify([
+        {
+          action: 'criado_via_coleta',
+          timestamp_sp: formattedReceivedAtSp,
+          actor: 'public_submission'
+        }
+      ])
+    );
+
+    e.app.save(newRecord);
+
+    return e.json(201, {
+      success: true,
+      received: true
+    });
+  } catch (err) {
+    // REGRA DE SEGURANÇA CRÍTICA:
+    // Erro de UNIQUE genérico NÃO autoriza retorno 201 por si só.
+    // Pode ser violação de outra constraint de banco ou colisão não-idempotente.
+    // Somente devolve 201 canônico DEPOIS de reconsultar o banco e confirmar
+    // com 100% de certeza que existe registro com a MESMA idempotency_key exata.
+    // Se a consulta falhar (erro de IO/leitura) ou o registro NÃO for encontrado,
+    // DEVE devolver erro constante { success: false, error: 'internal_error' } com status 500.
+    try {
+      var confirmedRecord = e.app.findFirstRecordByData('reports', 'idempotency_key', cleanIdempotencyKey);
+      if (confirmedRecord) {
+        return e.json(201, {
+          success: true,
+          received: true
+        });
+      }
+    } catch (_) {
+      // Falha ao confirmar existência com a mesma chave
+    }
+
+    // Erro público constante sem expor stack trace, banco de dados ou detalhes internos
+    return e.json(500, {
+      success: false,
+      error: 'internal_error'
+    });
+  }
+});
