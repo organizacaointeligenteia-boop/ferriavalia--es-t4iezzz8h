@@ -11,45 +11,72 @@
  * - Não usa Intl (Goja não garante IANA) nem offset fixo/aritmético (-3h/UTC-3).
  * - Neutraliza o risco central da API do PocketBase: new Timezone('invalido') retorna UTC silenciosamente.
  *   Se a zone string for diferente de 'America/Sao_Paulo', rejeita imediatamente como timezone_unavailable.
+ * - CONTRATO PÚBLICO DE ERRO ESTRITO:
+ *   Qualquer falha (bindings ausentes, exceções de métodos nativos, validação de fuso,
+ *   ISO inválido, audit fora de range ou incoerente, nowOverride inválido) retorna EXCLUSIVAMENTE:
+ *   { success: false, statusCode: 503, error: 'timezone_unavailable' }
+ *   Sem campos adicionais (sem details, message, stack ou pistas técnicas no erro público).
  */
 
 function resolveNativeTime(options) {
-  var opts = options || {};
-  var expectedTz = 'America/Sao_Paulo';
-
-  // 1. Verificação de ambiente dos construtores globais do host PocketBase JSVM
-  if (typeof DateTime !== 'function' || typeof Timezone !== 'function') {
+  function fail() {
     return {
       success: false,
       statusCode: 503,
-      error: 'timezone_unavailable',
-      details: 'Host bindings DateTime or Timezone unavailable'
+      error: 'timezone_unavailable'
     };
   }
 
-  // 2. Resolução da Location via construtor oficial do PocketBase JSVM
+  function isLeapYear(year) {
+    return (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+  }
+
+  function daysInMonth(year, month) {
+    var leap = isLeapYear(year);
+    var table = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    return table[month - 1];
+  }
+
+  var expectedTz = 'America/Sao_Paulo';
+
+  // 1. Verificação segura do parâmetro options e nowOverride
+  var dt = null;
+  var hasOverride = false;
+
+  if (options !== null && typeof options === 'object') {
+    if ('nowOverride' in options) {
+      hasOverride = true;
+      var candidate = options.nowOverride;
+      if (
+        !candidate ||
+        typeof candidate !== 'object' ||
+        typeof candidate.time !== 'function' ||
+        typeof candidate.unix !== 'function'
+      ) {
+        return fail();
+      }
+      dt = candidate;
+    }
+  }
+
+  // 2. Verificação de ambiente dos construtores globais do host PocketBase JSVM
+  if (typeof DateTime !== 'function' || typeof Timezone !== 'function') {
+    return fail();
+  }
+
+  // 3. Resolução da Location via construtor oficial do PocketBase JSVM
   var loc = null;
   try {
     loc = new Timezone(expectedTz);
   } catch (errLoc) {
-    return {
-      success: false,
-      statusCode: 503,
-      error: 'timezone_unavailable',
-      details: 'Failed to instantiate Timezone location'
-    };
+    return fail();
   }
 
   if (!loc || typeof loc !== 'object') {
-    return {
-      success: false,
-      statusCode: 503,
-      error: 'timezone_unavailable',
-      details: 'Location object is null or invalid'
-    };
+    return fail();
   }
 
-  // 3. Checagem essencial contra o risco central do PocketBase:
+  // 4. Checagem contra o risco central do PocketBase:
   // Se Timezone() receber nome inválido ou falhar em carregar IANA, ele retorna "UTC".
   // Validamos a zone string em loc.string() e String(loc). Deve ser EXATAMENTE 'America/Sao_Paulo'.
   var locString = '';
@@ -60,35 +87,20 @@ function resolveNativeTime(options) {
       locString = String(loc);
     }
   } catch (errStr) {
-    return {
-      success: false,
-      statusCode: 503,
-      error: 'timezone_unavailable',
-      details: 'Failed to obtain location zone string'
-    };
+    return fail();
   }
 
   if (locString !== expectedTz) {
-    return {
-      success: false,
-      statusCode: 503,
-      error: 'timezone_unavailable',
-      details: 'Location zone mismatch or UTC fallback detected: ' + locString
-    };
+    return fail();
   }
 
-  // 4. Captura de UM ÚNICO DateTime de agora (reusado para todo o fluxo)
-  // Aceita injeção apenas para testes controlados via opts.nowOverride (instância DateTime)
-  var dt = null;
-  try {
-    dt = opts.nowOverride ? opts.nowOverride : new DateTime();
-  } catch (errDt) {
-    return {
-      success: false,
-      statusCode: 503,
-      error: 'timezone_unavailable',
-      details: 'Failed to capture single DateTime instant'
-    };
+  // 5. Captura de UM ÚNICO DateTime de agora (caso não haja override válido)
+  if (!hasOverride) {
+    try {
+      dt = new DateTime();
+    } catch (errDt) {
+      return fail();
+    }
   }
 
   if (
@@ -97,88 +109,73 @@ function resolveNativeTime(options) {
     typeof dt.time !== 'function' ||
     typeof dt.unix !== 'function'
   ) {
-    return {
-      success: false,
-      statusCode: 503,
-      error: 'timezone_unavailable',
-      details: 'DateTime instance missing required methods'
-    };
+    return fail();
   }
 
-  var epochSeconds = dt.unix();
-  if (typeof epochSeconds !== 'number' || !isFinite(epochSeconds) || epochSeconds <= 0) {
-    return {
-      success: false,
-      statusCode: 503,
-      error: 'timezone_unavailable',
-      details: 'DateTime unix epoch is non-finite or invalid'
-    };
+  // 6. Extração e validação do unix epoch seconds do DateTime
+  var epochSeconds = null;
+  try {
+    epochSeconds = dt.unix();
+  } catch (errUnix) {
+    return fail();
   }
 
-  // 5. Conversão via time().in(loc) nativo
+  if (
+    typeof epochSeconds !== 'number' ||
+    !isFinite(epochSeconds) ||
+    Math.floor(epochSeconds) !== epochSeconds ||
+    epochSeconds <= 0
+  ) {
+    return fail();
+  }
+
+  // 7. Conversão via time().in(loc) nativo Go
   var goTimeUtc = null;
   var goTimeSp = null;
   try {
     goTimeUtc = dt.time();
     if (!goTimeUtc || typeof goTimeUtc.in !== 'function') {
-      return {
-        success: false,
-        statusCode: 503,
-        error: 'timezone_unavailable',
-        details: 'Go time interface missing method in()'
-      };
+      return fail();
     }
     goTimeSp = goTimeUtc.in(loc);
   } catch (errIn) {
-    return {
-      success: false,
-      statusCode: 503,
-      error: 'timezone_unavailable',
-      details: 'Error executing time.in(loc)'
-    };
+    return fail();
   }
 
-  if (!goTimeSp || typeof goTimeSp.format !== 'function') {
-    return {
-      success: false,
-      statusCode: 503,
-      error: 'timezone_unavailable',
-      details: 'Converted time instance missing method format()'
-    };
+  if (
+    !goTimeSp ||
+    typeof goTimeSp !== 'object' ||
+    typeof goTimeSp.format !== 'function' ||
+    typeof goTimeSp.location !== 'function'
+  ) {
+    return fail();
   }
 
-  // Validação adicional da Location associada ao objeto Time convertido
+  // 8. Validação OBRIGATÓRIA da Location associada ao objeto Time convertido:
+  // location() deve estar presente e loc.string() / String(loc) deve ser exatamente 'America/Sao_Paulo'
   try {
-    if (typeof goTimeSp.location === 'function') {
-      var tLoc = goTimeSp.location();
-      var tLocString = (tLoc && typeof tLoc.string === 'function') ? tLoc.string() : String(tLoc);
-      if (tLocString !== expectedTz) {
-        return {
-          success: false,
-          statusCode: 503,
-          error: 'timezone_unavailable',
-          details: 'Converted time location mismatch: ' + tLocString
-        };
-      }
+    var tLoc = goTimeSp.location();
+    if (!tLoc || typeof tLoc !== 'object') {
+      return fail();
+    }
+    var tLocString = (typeof tLoc.string === 'function') ? tLoc.string() : String(tLoc);
+    if (tLocString !== expectedTz) {
+      return fail();
     }
   } catch (errTLoc) {
-    return {
-      success: false,
-      statusCode: 503,
-      error: 'timezone_unavailable',
-      details: 'Error verifying converted time location'
-    };
+    return fail();
   }
 
-  // 6. Formatações canônicas estritas com layouts Go oficiais
+  // 9. Formatações nativas com layouts Go oficiais
   // Layouts de referência Go: "2006-01-02", "02/01/2006 às 15:04:05"
   var todayDateSp = '';
+  var timeAudit = '';
   var formattedReceivedAtSp = '';
   var receivedAtIsoUtc = '';
 
   try {
     todayDateSp = goTimeSp.format('2006-01-02');
-    var timeAudit = goTimeSp.format('02/01/2006 às 15:04:05');
+    timeAudit = goTimeSp.format('02/01/2006 às 15:04:05');
     formattedReceivedAtSp = timeAudit + ' (America/Sao_Paulo)';
 
     // ISO UTC do MESMO instante capturado no DateTime inicial
@@ -188,24 +185,13 @@ function resolveNativeTime(options) {
       receivedAtIsoUtc = dt.string();
     }
   } catch (errFmt) {
-    return {
-      success: false,
-      statusCode: 503,
-      error: 'timezone_unavailable',
-      details: 'Error executing Go time format()'
-    };
+    return fail();
   }
 
-  // 7. Validação estrita das saídas geradas
-  // Date-only civil de hoje (AAAA-MM-DD)
+  // 10. Validação do Date-only civil de hoje em SP (AAAA-MM-DD)
   var dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(todayDateSp);
   if (!dateMatch) {
-    return {
-      success: false,
-      statusCode: 503,
-      error: 'timezone_unavailable',
-      details: 'Malformed today date-only string'
-    };
+    return fail();
   }
 
   var y = parseInt(dateMatch[1], 10);
@@ -213,44 +199,95 @@ function resolveNativeTime(options) {
   var d = parseInt(dateMatch[3], 10);
 
   if (y < 1900 || y > 2100 || m < 1 || m > 12) {
-    return {
-      success: false,
-      statusCode: 503,
-      error: 'timezone_unavailable',
-      details: 'Out-of-range year or month in date-only'
-    };
+    return fail();
   }
 
-  var isLeap = (y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0);
-  var daysInMonth = [31, isLeap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  if (d < 1 || d > daysInMonth[m - 1]) {
-    return {
-      success: false,
-      statusCode: 503,
-      error: 'timezone_unavailable',
-      details: 'Invalid day of month in date-only'
-    };
+  if (d < 1 || d > daysInMonth(y, m)) {
+    return fail();
   }
 
-  // Validação do formato legível de auditoria SP
-  var auditRegex = /^\d{2}\/\d{2}\/\d{4} às \d{2}:\d{2}:\d{2} \(America\/Sao_Paulo\)$/;
-  if (!auditRegex.test(formattedReceivedAtSp)) {
-    return {
-      success: false,
-      statusCode: 503,
-      error: 'timezone_unavailable',
-      details: 'Malformed formatted audit timestamp'
-    };
+  // 11. Validação estrita do rótulo legível de auditoria SP:
+  // Formato: "DD/MM/AAAA às HH:MM:SS (America/Sao_Paulo)"
+  var auditMatch = /^(\d{2})\/(\d{2})\/(\d{4}) às (\d{2}):(\d{2}):(\d{2}) \(America\/Sao_Paulo\)$/.exec(formattedReceivedAtSp);
+  if (!auditMatch) {
+    return fail();
   }
 
-  // Validação do formato ISO UTC
-  if (typeof receivedAtIsoUtc !== 'string' || receivedAtIsoUtc.length < 10) {
-    return {
-      success: false,
-      statusCode: 503,
-      error: 'timezone_unavailable',
-      details: 'Invalid ISO UTC timestamp'
-    };
+  var auditDay = parseInt(auditMatch[1], 10);
+  var auditMonth = parseInt(auditMatch[2], 10);
+  var auditYear = parseInt(auditMatch[3], 10);
+  var auditHour = parseInt(auditMatch[4], 10);
+  var auditMin = parseInt(auditMatch[5], 10);
+  var auditSec = parseInt(auditMatch[6], 10);
+
+  // Ranges reais de tempo
+  if (
+    auditHour < 0 || auditHour > 23 ||
+    auditMin < 0 || auditMin > 59 ||
+    auditSec < 0 || auditSec > 59 ||
+    auditYear < 1900 || auditYear > 2100 ||
+    auditMonth < 1 || auditMonth > 12
+  ) {
+    return fail();
+  }
+
+  // Calendário real / bissexto para a data do audit
+  if (auditDay < 1 || auditDay > daysInMonth(auditYear, auditMonth)) {
+    return fail();
+  }
+
+  // Coerência YMD estrita entre o rótulo de auditoria e o date-only do MESMO instante
+  if (auditYear !== y || auditMonth !== m || auditDay !== d) {
+    return fail();
+  }
+
+  // 12. Validação estrita do ISO UTC retornado:
+  // Deve ser canônico ISO 8601 UTC válido: AAAA-MM-DDTHH:MM:SS.mmmZ ou AAAA-MM-DDTHH:MM:SSZ
+  if (typeof receivedAtIsoUtc !== 'string') {
+    return fail();
+  }
+
+  var isoUtcMatch = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?Z$/.exec(receivedAtIsoUtc);
+  if (!isoUtcMatch) {
+    return fail();
+  }
+
+  var isoYear = parseInt(isoUtcMatch[1], 10);
+  var isoMonth = parseInt(isoUtcMatch[2], 10);
+  var isoDay = parseInt(isoUtcMatch[3], 10);
+  var isoHour = parseInt(isoUtcMatch[4], 10);
+  var isoMin = parseInt(isoUtcMatch[5], 10);
+  var isoSec = parseInt(isoUtcMatch[6], 10);
+
+  if (
+    isoHour < 0 || isoHour > 23 ||
+    isoMin < 0 || isoMin > 59 ||
+    isoSec < 0 || isoSec > 59 ||
+    isoYear < 1900 || isoYear > 2100 ||
+    isoMonth < 1 || isoMonth > 12
+  ) {
+    return fail();
+  }
+
+  if (isoDay < 1 || isoDay > daysInMonth(isoYear, isoMonth)) {
+    return fail();
+  }
+
+  // Comparar epoch UTC derivado do ISO com o epochSeconds do DateTime capturado:
+  // Devem corresponder exatamente ao MESMO instante
+  var isoUtcEpochSeconds = Math.floor(Date.UTC(isoYear, isoMonth - 1, isoDay, isoHour, isoMin, isoSec) / 1000);
+  if (isoUtcEpochSeconds !== epochSeconds) {
+    return fail();
+  }
+
+  // 13. Validação de coerência do horário de auditoria SP com o epoch capturado
+  // A diferença entre o horário civil SP e o UTC do mesmo instante deve estar em um offset válido
+  // No Brasil (America/Sao_Paulo): UTC-3 (horário padrão) ou UTC-2 (histórico horário de verão)
+  var spLocalEpochSeconds = Math.floor(Date.UTC(auditYear, auditMonth - 1, auditDay, auditHour, auditMin, auditSec) / 1000);
+  var offsetSeconds = spLocalEpochSeconds - epochSeconds;
+  // Offset em segundos: UTC-3 = -10800s (-3h); UTC-2 = -7200s (-2h)
+  if (offsetSeconds !== -10800 && offsetSeconds !== -7200) {
+    return fail();
   }
 
   return {

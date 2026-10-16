@@ -155,7 +155,19 @@ Esta seção documenta com rigor auditável o estado técnico, de governança e 
         - UNIQUE com registro confirmado -> 201 canônico; UNIQUE sem confirmação -> 500 erro constante;
         - Limiter fail-closed (IP inválido ou erro no banco) -> 429 rate_limited.
 
-8. **Ausência de Integração e Bloqueio de Publicação / QR de Placa:**
+8. **Auditoria e Correção Estrita do Adapter Nativo de Tempo Inativo (`native-time-adapter.js.txt`):**
+   - **Contexto de Teste Isolado:** Testado pelo usuário em ambiente Node.js isolado (vm sem process/require/rede/DB) revelando 4 falhas reais no candidato v18 (unix() escapava exceção, location() ausente era aceito, ISO inválido aceito, audit 99/99/2026 às 99:99:99 aceito).
+   - **Correções Aplicadas no Adapter:**
+     1. **Captura Total de Exceções:** Todos os métodos e construtores nativos (`unix()`, `time()`, `in()`, `format()`, `location()`, `string()`, `new Timezone`, `new DateTime`) são encapsulados em blocos `try/catch` à prova de falhas, impedindo qualquer vazamento de exceção;
+     2. **Location Obrigatória:** Exige `location()` presente no Time convertido E `loc.string()` / `String(loc)` exatamente `'America/Sao_Paulo'`;
+     3. **Validação Estrita de ISO UTC:** Validação por regex canônico ISO 8601 UTC (`AAAA-MM-DDTHH:MM:SS(.mmm)?Z`), ranges de ano/mês/dia/hora/min/seg com calendário bissexto real, e comparação mandatória do epoch UTC derivado do ISO com o `epochSeconds` do `DateTime` capturado (devem corresponder ao MESMO instante);
+     4. **Validação Completa de Auditoria SP:** Ranges reais (0–23h, 0–59min, 0–59s, 1–12m, dias com calendário bissexto), coerência YMD estrita entre o rótulo de auditoria e a data-only do MESMO instante, e validação de offset em relação ao epoch (UTC-3 padrão ou UTC-2 histórico);
+     5. **Tratamento Rigoroso de `nowOverride`:** Se a chave `nowOverride` estiver explicitamente presente no objeto `options` com valor inválido (`null`, primitivo, objeto sem métodos), a requisição é sumariamente negada com erro 503, sem uso de `||` para cair no agora real;
+     6. **Contrato de Erro Público Estrito:** Toda e qualquer falha retorna EXCLUSIVAMENTE `{ success: false, statusCode: 503, error: 'timezone_unavailable' }` sem campos técnicos adicionais (`details`, `message`, `stack`).
+   - **Ambiente de Testes Mock:** `src/lib/nativeTimeAdapterMockTests.ts` atualizado com cenários dedicados para as 4 falhas reais, fallback UTC negado, caso positivo normal e incoerências de epoch/YMD, devidamente rotulado como *Node.js + in-memory mock ≠ Goja ≠ runtime real*.
+   - **Isolamento Absoluto:** Arquivo permanece estritamente INATIVO em `docs/candidates/reports-native/native-time-adapter.js.txt`. Sem deploy, sem hooks ativos alterados, sem schema ou migrations modificados.
+
+9. **Ausência de Integração e Bloqueio de Publicação / QR de Placa:**
    - **NÃO declarar integração pronta.** Nenhuma integração com serviços externos ou nuvem existe. O sistema NÃO está apto a dados reais.
    - Nenhuma publicação, deploy, configuração de DNS ou impressão/distribuição de QR code de placa está autorizada. O QR code demonstrativo da aplicação permanece restrito à visualização local sem destino público homologado.
 

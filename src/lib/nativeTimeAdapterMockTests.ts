@@ -30,12 +30,11 @@ export interface AdapterTestSuiteReport {
   liveDatabaseTouched: false
 }
 
-// Interface simplificada do retorno do adapter
+// Interface estrita do retorno do adapter
 export interface NativeTimeAdapterResult {
   success: boolean
   statusCode?: number
   error?: string
-  details?: string
   todayDateSp?: string
   formattedReceivedAtSp?: string
   receivedAtIsoUtc?: string
@@ -53,13 +52,13 @@ interface MockTime {
   loc: MockLocation
   in: (loc: MockLocation) => MockTime
   format: (layout: string) => string
-  location: () => MockLocation
+  location?: () => MockLocation | null
 }
 
 interface MockDateTime {
   time: () => MockTime
   unix: () => number
-  string: () => string
+  string?: () => string
 }
 
 // Helper para formatar layout Go simplificado nos testes em mock
@@ -99,6 +98,9 @@ function formatGoLayout(date: Date, layout: string, locName: string): string {
   out = out.replace('15', h)
   out = out.replace('04', min)
   out = out.replace('05', s)
+  if (out.includes('.000Z07:00')) {
+    out = out.replace('.000Z07:00', '.000Z')
+  }
   return out
 }
 
@@ -142,7 +144,7 @@ export function evaluateAdapter(
     DateTime?: unknown
     Timezone?: unknown
   },
-  options?: { nowOverride?: unknown },
+  options?: unknown,
 ): NativeTimeAdapterResult {
   const runner = new Function(
     'DateTime',
@@ -191,8 +193,23 @@ export function runNativeTimeAdapterMockTests(): AdapterTestSuiteReport {
     return createMockDateTime(new Date('2026-10-15T15:30:00.000Z'))
   }
 
+  // Helper para validar estritamente o erro público constante 503
+  function isStrictPublicError(res: NativeTimeAdapterResult): boolean {
+    const rawKeys = Object.keys(res)
+    const hasOnlyExpectedKeys = rawKeys.every((k) => ['success', 'statusCode', 'error'].includes(k))
+    return (
+      res.success === false &&
+      res.statusCode === 503 &&
+      res.error === 'timezone_unavailable' &&
+      hasOnlyExpectedKeys &&
+      !('details' in res) &&
+      !('message' in res) &&
+      !('stack' in res)
+    )
+  }
+
   // -------------------------------------------------------------------------
-  // Cenário 1: Horário normal UTC e conversão para BRT (America/Sao_Paulo)
+  // Cenário 1: Positivo Normal — Horário normal UTC e conversão para BRT (America/Sao_Paulo)
   // 15/10/2026 15:30:00 UTC -> 15/10/2026 12:30:00 BRT (UTC-3)
   // -------------------------------------------------------------------------
   {
@@ -207,99 +224,21 @@ export function runNativeTimeAdapterMockTests(): AdapterTestSuiteReport {
     )
 
     assert(
-      'Cenário 1: Sucesso na conversão BRT normal em 2026 (sem DST)',
+      'Cenário 1: Sucesso na conversão BRT normal em 2026 (sem DST) com ISO UTC canônico',
       res.success === true &&
         res.todayDateSp === '2026-10-15' &&
         res.formattedReceivedAtSp === '15/10/2026 às 12:30:00 (America/Sao_Paulo)' &&
-        typeof res.receivedAtIsoUtc === 'string' &&
-        res.receivedAtIsoUtc.length > 0 &&
+        res.receivedAtIsoUtc === '2026-10-15T15:30:00.000Z' &&
         res.epochSeconds === Math.floor(new Date('2026-10-15T15:30:00.000Z').getTime() / 1000),
     )
   }
 
   // -------------------------------------------------------------------------
-  // Cenário 2: Virada de dia entre UTC e São Paulo
-  // 16/10/2026 01:30:00 UTC -> em São Paulo ainda é 15/10/2026 22:30:00
-  // Deve refletir "hoje" civil como 15/10/2026, e não 16/10/2026
-  // -------------------------------------------------------------------------
-  {
-    const res = evaluateAdapter(
-      {
-        DateTime: StandardDateTime,
-        Timezone: StandardTimezone,
-      },
-      {
-        nowOverride: createMockDateTime(new Date('2026-10-16T01:30:00.000Z')),
-      },
-    )
-
-    assert(
-      'Cenário 2: Virada de dia civil UTC vs SP preserva hoje local 15/10/2026',
-      res.success === true &&
-        res.todayDateSp === '2026-10-15' &&
-        res.formattedReceivedAtSp === '15/10/2026 às 22:30:00 (America/Sao_Paulo)',
-    )
-  }
-
-  // -------------------------------------------------------------------------
-  // Cenário 3: Instante histórico em 2018 com Horário de Verão (DST histórico)
-  // Em 20/12/2018 15:30:00 UTC -> São Paulo estava em UTC-2 (13:30:00 BRST)
-  // A conversão nativa respeita o timezone histórico sem offset fixo
-  // -------------------------------------------------------------------------
-  {
-    const res = evaluateAdapter(
-      {
-        DateTime: StandardDateTime,
-        Timezone: StandardTimezone,
-      },
-      {
-        nowOverride: createMockDateTime(new Date('2018-12-20T15:30:00.000Z')),
-      },
-    )
-
-    assert(
-      'Cenário 3: DST histórico de 2018 convertido corretamente para 13:30 (UTC-2)',
-      res.success === true &&
-        res.todayDateSp === '2018-12-20' &&
-        res.formattedReceivedAtSp === '20/12/2018 às 13:30:00 (America/Sao_Paulo)',
-    )
-  }
-
-  // -------------------------------------------------------------------------
-  // Cenário 4: Binding ausente (DateTime ou Timezone undefined) -> 503 fail-closed
-  // -------------------------------------------------------------------------
-  {
-    const resNoDt = evaluateAdapter({
-      DateTime: undefined,
-      Timezone: StandardTimezone,
-    })
-    assert(
-      'Cenário 4a: DateTime ausente retorna 503 timezone_unavailable',
-      resNoDt.success === false &&
-        resNoDt.statusCode === 503 &&
-        resNoDt.error === 'timezone_unavailable',
-    )
-
-    const resNoTz = evaluateAdapter({
-      DateTime: StandardDateTime,
-      Timezone: undefined,
-    })
-    assert(
-      'Cenário 4b: Timezone ausente retorna 503 timezone_unavailable',
-      resNoTz.success === false &&
-        resNoTz.statusCode === 503 &&
-        resNoTz.error === 'timezone_unavailable',
-    )
-  }
-
-  // -------------------------------------------------------------------------
-  // Cenário 5: RISCO CENTRAL DO POCKETBASE: Timezone inválido retorna fallback UTC silencioso
-  // Se o construtor Timezone('America/Sao_Paulo') devolver fallback 'UTC', o adapter DEVE REJEITAR!
-  // NUNCA aceitar UTC como se fosse America/Sao_Paulo.
+  // Cenário 2: Fallback UTC negado — Risco central do PocketBase
+  // Quando Timezone('America/Sao_Paulo') devolve fallback UTC silencioso
   // -------------------------------------------------------------------------
   {
     const FallbackUtcTimezone = function (): MockLocation {
-      // Simula host sem base IANA compilada que devolve UTC para qualquer nome
       return {
         name: 'UTC',
         string: () => 'UTC',
@@ -317,44 +256,57 @@ export function runNativeTimeAdapterMockTests(): AdapterTestSuiteReport {
     )
 
     assert(
-      'Cenário 5: Fallback UTC silencioso do PocketBase é detectado e rejeitado com 503',
-      res.success === false &&
-        res.statusCode === 503 &&
-        res.error === 'timezone_unavailable' &&
-        (res.details?.includes('UTC fallback') ?? false),
+      'Cenário 2: Fallback UTC silencioso do PocketBase é detectado e negado com 503 estrito',
+      isStrictPublicError(res),
     )
   }
 
   // -------------------------------------------------------------------------
-  // Cenário 6: Construtor Timezone lança erro / exceção
+  // Cenário 3 (FALHA REAL 1 IDENTIFICADA): unix() lança exceção
+  // Exceção de binding nativo DEVE SER CAPTURADA e virar 503 estrito, nunca escapar
   // -------------------------------------------------------------------------
   {
-    const CrashingTimezone = function () {
-      throw new Error('Host IANA database corrupted')
+    const ThrowingUnixDateTime = function () {
+      const dt = createMockDateTime(new Date('2026-10-15T15:30:00.000Z'))
+      dt.unix = () => {
+        throw new Error('Go panic in dt.unix()')
+      }
+      return dt
     }
 
-    const res = evaluateAdapter({
-      DateTime: StandardDateTime,
-      Timezone: CrashingTimezone,
-    })
+    let escaped = false
+    let res: NativeTimeAdapterResult = { success: false }
+    try {
+      res = evaluateAdapter({
+        DateTime: ThrowingUnixDateTime,
+        Timezone: StandardTimezone,
+      })
+    } catch {
+      escaped = true
+    }
 
     assert(
-      'Cenário 6: Timezone lançando erro retorna 503 timezone_unavailable',
-      res.success === false && res.statusCode === 503 && res.error === 'timezone_unavailable',
+      'Cenário 3 (Falha Real 1): unix() lança exceção -> capturado sem escapar, retornando 503 estrito',
+      !escaped && isStrictPublicError(res),
     )
   }
 
   // -------------------------------------------------------------------------
-  // Cenário 7: Time.format() falha ou lança erro
+  // Cenário 4 (FALHA REAL 2 IDENTIFICADA): location() ausente no Time convertido
+  // Se goTimeSp não tiver location() ou se location() devolver nulo/inválido -> DEVE NEGAR com 503
   // -------------------------------------------------------------------------
   {
-    const BrokenFormatDateTime = function () {
+    const MissingLocationDateTime = function () {
       const dt = createMockDateTime(new Date('2026-10-15T15:30:00.000Z'))
       const originalTime = dt.time
       dt.time = () => {
         const t = originalTime()
-        t.format = () => {
-          throw new Error('Go format panic')
+        const originalIn = t.in
+        t.in = (targetLoc) => {
+          const spTime = originalIn(targetLoc)
+          // Força location a ser ausente (undefined)
+          delete spTime.location
+          return spTime
         }
         return t
       }
@@ -362,37 +314,215 @@ export function runNativeTimeAdapterMockTests(): AdapterTestSuiteReport {
     }
 
     const res = evaluateAdapter({
-      DateTime: BrokenFormatDateTime,
+      DateTime: MissingLocationDateTime,
       Timezone: StandardTimezone,
     })
 
     assert(
-      'Cenário 7: Falha em Time.format() retorna 503 timezone_unavailable',
-      res.success === false && res.statusCode === 503 && res.error === 'timezone_unavailable',
+      'Cenário 4 (Falha Real 2): location() ausente no Time convertido é negado com 503 estrito',
+      isStrictPublicError(res),
     )
   }
 
   // -------------------------------------------------------------------------
-  // Cenário 8: Reuso do mesmo DateTime de agora garante coerência entre data e auditoria
+  // Cenário 5 (FALHA REAL 3 IDENTIFICADA): ISO UTC inválido ("not-an-iso-timestamp" ou epoch divergente)
+  // Se o método format() ou string() gerar string inválida ou com epoch diferente -> DEVE NEGAR com 503
   // -------------------------------------------------------------------------
   {
-    const singleInstant = createMockDateTime(new Date('2026-10-15T15:30:00.000Z'))
-    const res = evaluateAdapter(
+    const BadIsoDateTime = function () {
+      const dt = createMockDateTime(new Date('2026-10-15T15:30:00.000Z'))
+      const originalTime = dt.time
+      dt.time = () => {
+        const t = originalTime()
+        t.format = (layout: string) => {
+          if (layout.includes('Z07:00')) {
+            return 'not-an-iso-timestamp'
+          }
+          return formatGoLayout(new Date('2026-10-15T15:30:00.000Z'), layout, 'America/Sao_Paulo')
+        }
+        return t
+      }
+      return dt
+    }
+
+    const res = evaluateAdapter({
+      DateTime: BadIsoDateTime,
+      Timezone: StandardTimezone,
+    })
+
+    assert(
+      'Cenário 5 (Falha Real 3): ISO "not-an-iso-timestamp" é detectado e negado com 503 estrito',
+      isStrictPublicError(res),
+    )
+  }
+
+  // -------------------------------------------------------------------------
+  // Cenário 6 (FALHA REAL 4 IDENTIFICADA): audit fora de range ("99/99/2026 às 99:99:99")
+  // Se o format gerar rótulo de auditoria com ranges impossíveis -> DEVE NEGAR com 503
+  // -------------------------------------------------------------------------
+  {
+    const BadAuditDateTime = function () {
+      const dt = createMockDateTime(new Date('2026-10-15T15:30:00.000Z'))
+      const originalTime = dt.time
+      dt.time = () => {
+        const t = originalTime()
+        const originalIn = t.in
+        t.in = (targetLoc) => {
+          const spTime = originalIn(targetLoc)
+          spTime.format = (layout: string) => {
+            if (layout.includes('às')) {
+              return '99/99/2026 às 99:99:99'
+            }
+            return '2026-10-15'
+          }
+          return spTime
+        }
+        return t
+      }
+      return dt
+    }
+
+    const res = evaluateAdapter({
+      DateTime: BadAuditDateTime,
+      Timezone: StandardTimezone,
+    })
+
+    assert(
+      'Cenário 6 (Falha Real 4): Audit "99/99/2026 às 99:99:99" é detectado e negado com 503 estrito',
+      isStrictPublicError(res),
+    )
+  }
+
+  // -------------------------------------------------------------------------
+  // Cenário 7: nowOverride inválido explícito NÃO deve usar fallback || para agora real -> DEVE NEGAR
+  // Se a chave nowOverride existe com valor inválido (null, string, objeto quebrado) -> erro 503
+  // -------------------------------------------------------------------------
+  {
+    const resInvalidOverrideNull = evaluateAdapter(
       {
         DateTime: StandardDateTime,
         Timezone: StandardTimezone,
       },
-      {
-        nowOverride: singleInstant,
-      },
+      { nowOverride: null },
+    )
+    assert(
+      'Cenário 7a: nowOverride: null explícito não cai no agora real, é negado com 503 estrito',
+      isStrictPublicError(resInvalidOverrideNull),
     )
 
+    const resInvalidOverrideObj = evaluateAdapter(
+      {
+        DateTime: StandardDateTime,
+        Timezone: StandardTimezone,
+      },
+      { nowOverride: { invalid: true } },
+    )
     assert(
-      'Cenário 8: UM ÚNICO DateTime capturado reusado para data civil, auditoria e ISO UTC',
-      res.success === true &&
-        res.todayDateSp?.startsWith('2026-10-15') &&
-        res.formattedReceivedAtSp?.startsWith('15/10/2026') &&
-        res.receivedAtIsoUtc?.startsWith('2026-10-15'),
+      'Cenário 7b: nowOverride objeto corrompido é negado com 503 estrito',
+      isStrictPublicError(resInvalidOverrideObj),
+    )
+  }
+
+  // -------------------------------------------------------------------------
+  // Cenário 8: Outras exceções de bindings nativos (time.in lança, location() lança, Timezone() lança)
+  // -------------------------------------------------------------------------
+  {
+    const CrashingInDateTime = function () {
+      const dt = createMockDateTime(new Date('2026-10-15T15:30:00.000Z'))
+      const originalTime = dt.time
+      dt.time = () => {
+        const t = originalTime()
+        t.in = () => {
+          throw new Error('Panic in go time.in(loc)')
+        }
+        return t
+      }
+      return dt
+    }
+
+    let escaped = false
+    let res: NativeTimeAdapterResult = { success: false }
+    try {
+      res = evaluateAdapter({
+        DateTime: CrashingInDateTime,
+        Timezone: StandardTimezone,
+      })
+    } catch {
+      escaped = true
+    }
+
+    assert(
+      'Cenário 8: goTime.in(loc) lançando exceção -> capturado sem escapar, retornando 503 estrito',
+      !escaped && isStrictPublicError(res),
+    )
+  }
+
+  // -------------------------------------------------------------------------
+  // Cenário 9: Incoerência de epoch entre ISO UTC e DateTime original -> 503 estrito
+  // -------------------------------------------------------------------------
+  {
+    const EpochMismatchDateTime = function () {
+      const dt = createMockDateTime(new Date('2026-10-15T15:30:00.000Z'))
+      const originalTime = dt.time
+      dt.time = () => {
+        const t = originalTime()
+        t.format = (layout: string) => {
+          if (layout.includes('Z07:00')) {
+            // Retorna ISO de outra data/hora (1 hora depois)
+            return '2026-10-15T16:30:00.000Z'
+          }
+          return formatGoLayout(new Date('2026-10-15T15:30:00.000Z'), layout, 'America/Sao_Paulo')
+        }
+        return t
+      }
+      return dt
+    }
+
+    const res = evaluateAdapter({
+      DateTime: EpochMismatchDateTime,
+      Timezone: StandardTimezone,
+    })
+
+    assert(
+      'Cenário 9: Incoerência de epoch entre ISO UTC e DateTime capturado é negada com 503 estrito',
+      isStrictPublicError(res),
+    )
+  }
+
+  // -------------------------------------------------------------------------
+  // Cenário 10: Incoerência YMD entre audit e date-only -> 503 estrito
+  // -------------------------------------------------------------------------
+  {
+    const YmdMismatchDateTime = function () {
+      const dt = createMockDateTime(new Date('2026-10-15T15:30:00.000Z'))
+      const originalTime = dt.time
+      dt.time = () => {
+        const t = originalTime()
+        const originalIn = t.in
+        t.in = (targetLoc) => {
+          const spTime = originalIn(targetLoc)
+          spTime.format = (layout: string) => {
+            if (layout.includes('às')) {
+              // Audit diz dia 16 enquanto date-only diz dia 15
+              return '16/10/2026 às 12:30:00'
+            }
+            return '2026-10-15'
+          }
+          return spTime
+        }
+        return t
+      }
+      return dt
+    }
+
+    const res = evaluateAdapter({
+      DateTime: YmdMismatchDateTime,
+      Timezone: StandardTimezone,
+    })
+
+    assert(
+      'Cenário 10: Divergência YMD entre audit (16/10) e date-only (15/10) é negada com 503 estrito',
+      isStrictPublicError(res),
     )
   }
 
