@@ -1,0 +1,641 @@
+/**
+ * ARTEFATO NATIVO COMPOSTO (INATIVO) — Endpoint de Criação de Relatos
+ * Arquivo: docs/candidates/reports-native/reports-native-composed.js.txt
+ * Rota pretendida: POST /backend/v1/reports
+ * Projeto: Ferri & Ferri — Relatos e Experiência
+ * ID do Projeto: 9d1a62e7-f60e-4585-aecf-107d6a652a9d
+ * Data real de registro: 15/10/2026
+ *
+ * COMPOSIÇÃO FORMAL:
+ * 1. Coletor v0.0.17 (docs/candidates/reports-native/reports-native-candidate.js.txt):
+ *    - Callback de routerAdd('POST', '/backend/v1/reports', function(e) { ... })
+ *    - Validação estrutural de payload bruto (objeto não-nulo, não-array)
+ *    - ALLOWED_TERMS_VERSIONS dentro do callback
+ *    - Higienização e validação estrita de campos
+ *    - Validação de calendário gregoriano (1900-2100, bissextos) e checagem de data futura
+ *    - Verificação preventiva de idempotência canônica com retorno { success: true, received: true } (201)
+ *    - Inserção com Record e persistência atômica
+ *    - Catch de UNIQUE com reconsulta de confirmação da MESMA idempotency_key antes de devolver 201
+ * 2. Adapter nativo v0.0.19 (docs/candidates/reports-native/native-time-adapter.js.txt):
+ *    - Função resolveNativeTime posicionada DENTRO do callback do routerAdd Goja
+ *    - DateTime e Timezone nativos da JSVM PocketBase
+ *    - new Timezone('America/Sao_Paulo') global com verificação estrita de zone string
+ *      (neutralizando risco central de fallback UTC silencioso do PocketBase)
+ *    - Validações de ranges, calendário, coerência YMD e epoch matching entre ISO UTC e DateTime original
+ *    - Contrato público de erro estrito exclusivo: { success: false, statusCode: 503, error: 'timezone_unavailable' }
+ *    - UM ÚNICO instante server-side capturado por requisição e reusado por todas as saídas
+ *      (todaySpString para checagem de data futura; received_at_sp para rótulo BRT; receivedAtIsoUtc na audit_history)
+ * 3. Gate de Quota Injetável (Candidato de Limiter):
+ *    - O antigo contador de relatos recentes da coleção 'reports' foi REMOVIDO como mecanismo de proteção.
+ *    - Implementado gate de quota INJETÁVEL (e.quotaProvider / options.quotaProvider).
+ *    - DEFAULT-DENY absoluto: quando não há provider confiável configurado, nega sumariamente com
+ *      status 429 e corpo constante { success: false, error: 'rate_limited' }.
+ *    - Se o provider lançar erro ou retornar resultado malformado/inválido (não-objeto ou allowed !== true),
+ *      nega fail-closed com status 429.
+ *    - Nenhum SDK, segredo mockado, IP arbitrário ou tabela não-provisionada é inventada.
+ *    - A ordem estrita de execução é: QUOTA → TIMEZONE → VALIDAÇÃO → DEDUP PREVENTIVO → SAVE.
+ *    - Erro de quota ou timezone encerra a requisição IMEDIATAMENTE antes de qualquer consulta ou escrita no banco.
+ *
+ * STATUS: ARTEFATO INATIVO mantido fora de pocketbase/hooks para não sofrer autodiscovery.
+ */
+
+routerAdd('POST', '/backend/v1/reports', function (e) {
+  // =========================================================================
+  // 1. GATE DE QUOTA / RATE LIMITING (INJETÁVEL, DEFAULT-DENY)
+  // =========================================================================
+  // Sem provider confiável de infraestrutura (HMAC gerenciado + proxy confiável + storage dedicado),
+  // o comportamento obrigatório é DEFAULT-DENY fail-closed com resposta 429 constante.
+  // O antigo count de 'reports' recentes foi removido por não representar proteção adequada.
+  try {
+    var quotaProvider = null;
+    if (e && typeof e === 'object' && e.quotaProvider) {
+      quotaProvider = e.quotaProvider;
+    }
+
+    if (!quotaProvider || typeof quotaProvider.checkQuota !== 'function') {
+      return e.json(429, {
+        success: false,
+        error: 'rate_limited'
+      });
+    }
+
+    var quotaResult = quotaProvider.checkQuota(e);
+    if (!quotaResult || typeof quotaResult !== 'object' || quotaResult.allowed !== true) {
+      return e.json(429, {
+        success: false,
+        error: 'rate_limited'
+      });
+    }
+  } catch (_) {
+    return e.json(429, {
+      success: false,
+      error: 'rate_limited'
+    });
+  }
+
+  // =========================================================================
+  // 2. RESOLUÇÃO DE TEMPO NATIVO (ADAPTER v19 EMBUTIDO NO ESCOPO DO CALLBACK)
+  // =========================================================================
+  // Captura UM ÚNICO DateTime nativo da JSVM PocketBase por requisição,
+  // neutraliza o risco de fallback UTC de Timezone, valida ranges e coerência de datas.
+  function resolveNativeTime(options) {
+    function fail() {
+      return {
+        success: false,
+        statusCode: 503,
+        error: 'timezone_unavailable'
+      };
+    }
+
+    function isLeapYear(year) {
+      return (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+    }
+
+    function daysInMonth(year, month) {
+      var leap = isLeapYear(year);
+      var table = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+      return table[month - 1];
+    }
+
+    var expectedTz = 'America/Sao_Paulo';
+
+    // 1. Verificação segura do parâmetro options e nowOverride
+    var dt = null;
+    var hasOverride = false;
+
+    if (options !== null && typeof options === 'object') {
+      if ('nowOverride' in options) {
+        hasOverride = true;
+        var candidate = options.nowOverride;
+        if (
+          !candidate ||
+          typeof candidate !== 'object' ||
+          typeof candidate.time !== 'function' ||
+          typeof candidate.unix !== 'function'
+        ) {
+          return fail();
+        }
+        dt = candidate;
+      }
+    }
+
+    // 2. Verificação de ambiente dos construtores globais do host PocketBase JSVM
+    if (typeof DateTime !== 'function' || typeof Timezone !== 'function') {
+      return fail();
+    }
+
+    // 3. Resolução da Location via construtor oficial do PocketBase JSVM
+    var loc = null;
+    try {
+      loc = new Timezone(expectedTz);
+    } catch (errLoc) {
+      return fail();
+    }
+
+    if (!loc || typeof loc !== 'object') {
+      return fail();
+    }
+
+    // 4. Checagem contra o risco central do PocketBase:
+    // Se Timezone() receber nome inválido ou falhar em carregar IANA, ele retorna "UTC".
+    // Validamos a zone string em loc.string() e String(loc). Deve ser EXATAMENTE 'America/Sao_Paulo'.
+    var locString = '';
+    try {
+      if (typeof loc.string === 'function') {
+        locString = loc.string();
+      } else {
+        locString = String(loc);
+      }
+    } catch (errStr) {
+      return fail();
+    }
+
+    if (locString !== expectedTz) {
+      return fail();
+    }
+
+    // 5. Captura de UM ÚNICO DateTime de agora (caso não haja override válido)
+    if (!hasOverride) {
+      try {
+        dt = new DateTime();
+      } catch (errDt) {
+        return fail();
+      }
+    }
+
+    if (
+      !dt ||
+      typeof dt !== 'object' ||
+      typeof dt.time !== 'function' ||
+      typeof dt.unix !== 'function'
+    ) {
+      return fail();
+    }
+
+    // 6. Extração e validação do unix epoch seconds do DateTime
+    var epochSeconds = null;
+    try {
+      epochSeconds = dt.unix();
+    } catch (errUnix) {
+      return fail();
+    }
+
+    if (
+      typeof epochSeconds !== 'number' ||
+      !isFinite(epochSeconds) ||
+      Math.floor(epochSeconds) !== epochSeconds ||
+      epochSeconds <= 0
+    ) {
+      return fail();
+    }
+
+    // 7. Conversão via time().in(loc) nativo Go
+    var goTimeUtc = null;
+    var goTimeSp = null;
+    try {
+      goTimeUtc = dt.time();
+      if (!goTimeUtc || typeof goTimeUtc.in !== 'function') {
+        return fail();
+      }
+      goTimeSp = goTimeUtc.in(loc);
+    } catch (errIn) {
+      return fail();
+    }
+
+    if (
+      !goTimeSp ||
+      typeof goTimeSp !== 'object' ||
+      typeof goTimeSp.format !== 'function' ||
+      typeof goTimeSp.location !== 'function'
+    ) {
+      return fail();
+    }
+
+    // 8. Validação OBRIGATÓRIA da Location associada ao objeto Time convertido:
+    // location() deve estar presente e loc.string() / String(loc) deve ser exatamente 'America/Sao_Paulo'
+    try {
+      var tLoc = goTimeSp.location();
+      if (!tLoc || typeof tLoc !== 'object') {
+        return fail();
+      }
+      var tLocString = (typeof tLoc.string === 'function') ? tLoc.string() : String(tLoc);
+      if (tLocString !== expectedTz) {
+        return fail();
+      }
+    } catch (errTLoc) {
+      return fail();
+    }
+
+    // 9. Formatações nativas com layouts Go oficiais
+    // Layouts de referência Go: "2006-01-02", "02/01/2006 às 15:04:05"
+    var todayDateSp = '';
+    var timeAudit = '';
+    var formattedReceivedAtSp = '';
+    var receivedAtIsoUtc = '';
+
+    try {
+      todayDateSp = goTimeSp.format('2006-01-02');
+      timeAudit = goTimeSp.format('02/01/2006 às 15:04:05');
+      formattedReceivedAtSp = timeAudit + ' (America/Sao_Paulo)';
+
+      // ISO UTC do MESMO instante capturado no DateTime inicial
+      if (typeof goTimeUtc.format === 'function') {
+        receivedAtIsoUtc = goTimeUtc.format('2006-01-02T15:04:05.000Z07:00');
+      } else if (typeof dt.string === 'function') {
+        receivedAtIsoUtc = dt.string();
+      }
+    } catch (errFmt) {
+      return fail();
+    }
+
+    // 10. Validação do Date-only civil de hoje em SP (AAAA-MM-DD)
+    var dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(todayDateSp);
+    if (!dateMatch) {
+      return fail();
+    }
+
+    var y = parseInt(dateMatch[1], 10);
+    var m = parseInt(dateMatch[2], 10);
+    var d = parseInt(dateMatch[3], 10);
+
+    if (y < 1900 || y > 2100 || m < 1 || m > 12) {
+      return fail();
+    }
+
+    if (d < 1 || d > daysInMonth(y, m)) {
+      return fail();
+    }
+
+    // 11. Validação estrita do rótulo legível de auditoria SP:
+    // Formato: "DD/MM/AAAA às HH:MM:SS (America/Sao_Paulo)"
+    var auditMatch = /^(\d{2})\/(\d{2})\/(\d{4}) às (\d{2}):(\d{2}):(\d{2}) \(America\/Sao_Paulo\)$/.exec(formattedReceivedAtSp);
+    if (!auditMatch) {
+      return fail();
+    }
+
+    var auditDay = parseInt(auditMatch[1], 10);
+    var auditMonth = parseInt(auditMatch[2], 10);
+    var auditYear = parseInt(auditMatch[3], 10);
+    var auditHour = parseInt(auditMatch[4], 10);
+    var auditMin = parseInt(auditMatch[5], 10);
+    var auditSec = parseInt(auditMatch[6], 10);
+
+    // Ranges reais de tempo
+    if (
+      auditHour < 0 || auditHour > 23 ||
+      auditMin < 0 || auditMin > 59 ||
+      auditSec < 0 || auditSec > 59 ||
+      auditYear < 1900 || auditYear > 2100 ||
+      auditMonth < 1 || auditMonth > 12
+    ) {
+      return fail();
+    }
+
+    // Calendário real / bissexto para a data do audit
+    if (auditDay < 1 || auditDay > daysInMonth(auditYear, auditMonth)) {
+      return fail();
+    }
+
+    // Coerência YMD estrita entre o rótulo de auditoria e o date-only do MESMO instante
+    if (auditYear !== y || auditMonth !== m || auditDay !== d) {
+      return fail();
+    }
+
+    // 12. Validação estrita do ISO UTC retornado:
+    // Deve ser canônico ISO 8601 UTC válido: AAAA-MM-DDTHH:MM:SS.mmmZ ou AAAA-MM-DDTHH:MM:SSZ
+    if (typeof receivedAtIsoUtc !== 'string') {
+      return fail();
+    }
+
+    var isoUtcMatch = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?Z$/.exec(receivedAtIsoUtc);
+    if (!isoUtcMatch) {
+      return fail();
+    }
+
+    var isoYear = parseInt(isoUtcMatch[1], 10);
+    var isoMonth = parseInt(isoUtcMatch[2], 10);
+    var isoDay = parseInt(isoUtcMatch[3], 10);
+    var isoHour = parseInt(isoUtcMatch[4], 10);
+    var isoMin = parseInt(isoUtcMatch[5], 10);
+    var isoSec = parseInt(isoUtcMatch[6], 10);
+
+    if (
+      isoHour < 0 || isoHour > 23 ||
+      isoMin < 0 || isoMin > 59 ||
+      isoSec < 0 || isoSec > 59 ||
+      isoYear < 1900 || isoYear > 2100 ||
+      isoMonth < 1 || isoMonth > 12
+    ) {
+      return fail();
+    }
+
+    if (isoDay < 1 || isoDay > daysInMonth(isoYear, isoMonth)) {
+      return fail();
+    }
+
+    // Comparar epoch UTC derivado do ISO com o epochSeconds do DateTime capturado:
+    // Devem corresponder exatamente ao MESMO instante
+    var isoUtcEpochSeconds = Math.floor(Date.UTC(isoYear, isoMonth - 1, isoDay, isoHour, isoMin, isoSec) / 1000);
+    if (isoUtcEpochSeconds !== epochSeconds) {
+      return fail();
+    }
+
+    // 13. Validação de coerência do horário de auditoria SP com o epoch capturado
+    // A diferença entre o horário civil SP e o UTC do mesmo instante deve estar em um offset válido
+    // No Brasil (America/Sao_Paulo): UTC-3 (horário padrão) ou UTC-2 (histórico horário de verão)
+    var spLocalEpochSeconds = Math.floor(Date.UTC(auditYear, auditMonth - 1, auditDay, auditHour, auditMin, auditSec) / 1000);
+    var offsetSeconds = spLocalEpochSeconds - epochSeconds;
+    // Offset em segundos: UTC-3 = -10800s (-3h); UTC-2 = -7200s (-2h)
+    if (offsetSeconds !== -10800 && offsetSeconds !== -7200) {
+      return fail();
+    }
+
+    return {
+      success: true,
+      todayDateSp: todayDateSp,
+      formattedReceivedAtSp: formattedReceivedAtSp,
+      receivedAtIsoUtc: receivedAtIsoUtc,
+      epochSeconds: epochSeconds
+    };
+  }
+
+  // Execução do adapter de tempo nativo
+  var timeOpts = (e && typeof e === 'object' && e.timeOptions) ? e.timeOptions : null;
+  var timeResult = resolveNativeTime(timeOpts);
+
+  if (!timeResult || !timeResult.success) {
+    return e.json(503, {
+      success: false,
+      error: 'timezone_unavailable'
+    });
+  }
+
+  var todaySpString = timeResult.todayDateSp;
+  var formattedReceivedAtSp = timeResult.formattedReceivedAtSp;
+  var receivedAtIsoUtc = timeResult.receivedAtIsoUtc;
+
+  // Lista de versões de termos aceitas pelo fluxo frontend atual (sem alegação de aprovação formal)
+  var ALLOWED_TERMS_VERSIONS = [
+    'v1.0-2025',
+    'v1.0-2026'
+  ];
+
+  // =========================================================================
+  // 3. EXTRAÇÃO E HIGIENIZAÇÃO ESTRITA DO PAYLOAD BRUTO
+  // =========================================================================
+  var rawBody = null;
+  try {
+    var reqInfo = e.requestInfo();
+    rawBody = reqInfo ? reqInfo.body : null;
+  } catch (_) {
+    rawBody = null;
+  }
+
+  if (
+    rawBody === null ||
+    rawBody === undefined ||
+    typeof rawBody !== 'object' ||
+    Array.isArray(rawBody)
+  ) {
+    return e.json(400, {
+      success: false,
+      error: 'Payload inválido. Esperado objeto JSON não-nulo.'
+    });
+  }
+
+  var idempotencyKey = rawBody.idempotencyKey;
+  var consentGiven = rawBody.consentGiven;
+  var termsVersion = rawBody.termsVersion;
+  var experienceDate = rawBody.experienceDate;
+  var clientName = rawBody.clientName;
+  var relato = rawBody.relato;
+
+  var validationErrors = [];
+
+  // --- Validação estrita de idempotencyKey (obrigatória, 8 a 128 chars, string) ---
+  var cleanIdempotencyKey = null;
+  if (typeof idempotencyKey !== 'string' || idempotencyKey.trim().length === 0) {
+    validationErrors.push({
+      field: 'idempotencyKey',
+      message: 'Chave de idempotência é obrigatória e deve ser texto não-vazio.'
+    });
+  } else {
+    var trimmedKey = idempotencyKey.trim();
+    if (trimmedKey.length < 8 || trimmedKey.length > 128) {
+      validationErrors.push({
+        field: 'idempotencyKey',
+        message: 'Chave de idempotência deve ter entre 8 e 128 caracteres.'
+      });
+    } else {
+      cleanIdempotencyKey = trimmedKey;
+    }
+  }
+
+  // --- Validação estrita de consentGiven (booleano estrito true, sem coerção) ---
+  if (consentGiven !== true) {
+    validationErrors.push({
+      field: 'consentGiven',
+      message: 'Consentimento voluntário e prévio é obrigatório (deve ser estritamente true).'
+    });
+  }
+
+  // --- Validação estrita de termsVersion (pertencente à lista oficial permitida) ---
+  var cleanTermsVersion = null;
+  if (typeof termsVersion !== 'string' || termsVersion.trim().length === 0) {
+    validationErrors.push({
+      field: 'termsVersion',
+      message: 'Versão dos termos é obrigatória.'
+    });
+  } else {
+    var trimmedTerms = termsVersion.trim();
+    var isAllowedTerms = false;
+    for (var k = 0; k < ALLOWED_TERMS_VERSIONS.length; k++) {
+      if (ALLOWED_TERMS_VERSIONS[k] === trimmedTerms) {
+        isAllowedTerms = true;
+        break;
+      }
+    }
+    if (!isAllowedTerms) {
+      validationErrors.push({
+        field: 'termsVersion',
+        message: 'Versão dos termos não reconhecida ou descontinuada pelo escritório.'
+      });
+    } else {
+      cleanTermsVersion = trimmedTerms;
+    }
+  }
+
+  // --- Validação de clientName (opcional, máx 80 caracteres) ---
+  var cleanName = null;
+  if (clientName !== undefined && clientName !== null) {
+    if (typeof clientName !== 'string') {
+      validationErrors.push({
+        field: 'clientName',
+        message: 'Nome do cliente deve ser texto.'
+      });
+    } else {
+      var trimmedName = clientName.trim();
+      if (trimmedName.length > 80) {
+        validationErrors.push({
+          field: 'clientName',
+          message: 'Nome do cliente não pode exceder 80 caracteres.'
+        });
+      } else if (trimmedName.length > 0) {
+        cleanName = trimmedName;
+      }
+    }
+  }
+
+  // --- Validação de relato (opcional, máx 2000 caracteres) ---
+  var cleanRelato = null;
+  if (relato !== undefined && relato !== null) {
+    if (typeof relato !== 'string') {
+      validationErrors.push({
+        field: 'relato',
+        message: 'Relato deve ser texto.'
+      });
+    } else {
+      var trimmedRelato = relato.trim();
+      if (trimmedRelato.length > 2000) {
+        validationErrors.push({
+          field: 'relato',
+          message: 'Relato não pode exceder 2.000 caracteres.'
+        });
+      } else if (trimmedRelato.length > 0) {
+        cleanRelato = trimmedRelato;
+      }
+    }
+  }
+
+  // =========================================================================
+  // 4. VALIDAÇÃO DE CALENDÁRIO GREGORIANO E COMPARAÇÃO COM HOJE EM SÃO PAULO
+  // =========================================================================
+  var cleanExperienceDate = null;
+  if (typeof experienceDate !== 'string' || experienceDate.length === 0) {
+    validationErrors.push({
+      field: 'experienceDate',
+      message: 'Data da experiência é obrigatória.'
+    });
+  } else if (/\s/.test(experienceDate)) {
+    validationErrors.push({
+      field: 'experienceDate',
+      message: 'A data da experiência não pode conter espaços.'
+    });
+  } else {
+    var expDateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(experienceDate);
+    if (!expDateMatch) {
+      validationErrors.push({
+        field: 'experienceDate',
+        message: 'Formato de data inválido. Utilize o formato canônico AAAA-MM-DD.'
+      });
+    } else {
+      var expYear = parseInt(expDateMatch[1], 10);
+      var expMonth = parseInt(expDateMatch[2], 10);
+      var expDay = parseInt(expDateMatch[3], 10);
+
+      var isLeap = (expYear % 4 === 0 && expYear % 100 !== 0) || expYear % 400 === 0;
+      var daysInMonthTable = [31, isLeap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+      if (expYear < 1900 || expYear > 2100 || expMonth < 1 || expMonth > 12) {
+        validationErrors.push({
+          field: 'experienceDate',
+          message: 'Mês ou ano fora do intervalo gregoriano admitido (1900-2100).'
+        });
+      } else {
+        var maxAllowedDay = daysInMonthTable[expMonth - 1];
+        if (expDay < 1 || expDay > maxAllowedDay) {
+          validationErrors.push({
+            field: 'experienceDate',
+            message: 'Dia inválido para o mês e ano informados (ex.: 29 de fevereiro em ano não-bissexto ou 31 em mês de 30 dias).'
+          });
+        } else {
+          if (experienceDate > todaySpString) {
+            validationErrors.push({
+              field: 'experienceDate',
+              message: 'A data da experiência não pode ser futura em relação ao calendário corrente de São Paulo (America/Sao_Paulo).'
+            });
+          } else {
+            cleanExperienceDate = experienceDate;
+          }
+        }
+      }
+    }
+  }
+
+  if (validationErrors.length > 0) {
+    return e.json(400, {
+      success: false,
+      error: 'Falha na validação dos dados enviados.',
+      errors: validationErrors
+    });
+  }
+
+  // =========================================================================
+  // 5. VERIFICAÇÃO PREVENTIVA DE IDEMPOTÊNCIA CANÔNICA
+  // =========================================================================
+  try {
+    var existingRecord = e.app.findFirstRecordByData('reports', 'idempotency_key', cleanIdempotencyKey);
+    if (existingRecord) {
+      return e.json(201, {
+        success: true,
+        received: true
+      });
+    }
+  } catch (_) {
+    // findFirstRecordByData lança erro quando o registro não existe; prossegue para insert
+  }
+
+  // =========================================================================
+  // 6. INSERÇÃO ATÔMICA E TRATAMENTO SEGURO DE CONFLITO UNIQUE
+  // =========================================================================
+  try {
+    var reportsCollection = e.app.findCollectionByNameOrId('reports');
+    var newRecord = new Record(reportsCollection);
+
+    newRecord.set('idempotency_key', cleanIdempotencyKey);
+    newRecord.set('client_name', cleanName);
+    newRecord.set('relato', cleanRelato);
+    newRecord.set('experience_date', cleanExperienceDate);
+    newRecord.set('consent_given', true);
+    newRecord.set('terms_version', cleanTermsVersion);
+    newRecord.set('status', 'recebido');
+    newRecord.set('received_at_sp', formattedReceivedAtSp);
+    newRecord.set(
+      'audit_history',
+      JSON.stringify([
+        {
+          action: 'criado_via_coleta',
+          timestamp_sp: formattedReceivedAtSp,
+          timestamp_iso_utc: receivedAtIsoUtc,
+          actor: 'public_submission'
+        }
+      ])
+    );
+
+    e.app.save(newRecord);
+
+    return e.json(201, {
+      success: true,
+      received: true
+    });
+  } catch (err) {
+    // Somente devolve 201 canônico DEPOIS de reconsultar o banco e confirmar
+    // com 100% de certeza que existe registro com a MESMA idempotency_key exata.
+    try {
+      var confirmedRecord = e.app.findFirstRecordByData('reports', 'idempotency_key', cleanIdempotencyKey);
+      if (confirmedRecord) {
+        return e.json(201, {
+          success: true,
+          received: true
+        });
+      }
+    } catch (_) {
+      // Falha ao confirmar existência com a mesma chave
+    }
+
+    return e.json(500, {
+      success: false,
+      error: 'internal_error'
+    });
+  }
+});
