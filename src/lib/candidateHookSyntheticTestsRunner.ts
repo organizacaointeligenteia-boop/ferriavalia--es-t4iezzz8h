@@ -277,6 +277,364 @@ export async function runCandidateHookSyntheticTests(): Promise<CandidateHookSui
     )
   }
 
+  // G1.4: Part com valor 99 em month / day / hour -> 503 timezone_unavailable e ZERO inserts
+  {
+    const parts99Intl = {
+      DateTimeFormat: function (locale: string, opts?: { hour?: string }) {
+        return {
+          formatToParts: () => {
+            if (opts?.hour) {
+              return [
+                { type: 'day', value: '15' },
+                { type: 'month', value: '10' },
+                { type: 'year', value: '2026' },
+                { type: 'hour', value: '99' },
+                { type: 'minute', value: '30' },
+                { type: 'second', value: '00' },
+              ]
+            }
+            return [
+              { type: 'month', value: '99' },
+              { type: 'day', value: '99' },
+              { type: 'year', value: '2026' },
+            ]
+          },
+        }
+      },
+    }
+    const parts99Handler = loadCandidateHandler({ Intl: parts99Intl })
+    const mParts99 = createMockEvent({ body: validBasePayload })
+    parts99Handler(mParts99.e)
+    const rParts99 = mParts99.getResult()
+    assert(
+      suiteName,
+      'Intl com parts fora de range (month=99, day=99, hour=99) -> retorna 503 timezone_unavailable e ZERO inserts',
+      rParts99?.statusCode === 503 &&
+        rParts99.body.error === 'timezone_unavailable' &&
+        mParts99.saveCallCount() === 0 &&
+        mParts99.recordsTable.length === 0,
+    )
+  }
+
+  // G1.5: Part com valor "00" em month ou day -> 503 timezone_unavailable e ZERO inserts
+  {
+    const parts00Intl = {
+      DateTimeFormat: function () {
+        return {
+          formatToParts: () => [
+            { type: 'year', value: '2026' },
+            { type: 'month', value: '00' },
+            { type: 'day', value: '00' },
+          ],
+        }
+      },
+    }
+    const parts00Handler = loadCandidateHandler({ Intl: parts00Intl })
+    const mParts00 = createMockEvent({ body: validBasePayload })
+    parts00Handler(mParts00.e)
+    const rParts00 = mParts00.getResult()
+    assert(
+      suiteName,
+      'Intl com month=00 ou day=00 inválidos -> retorna 503 timezone_unavailable e ZERO inserts',
+      rParts00?.statusCode === 503 &&
+        rParts00.body.error === 'timezone_unavailable' &&
+        mParts00.saveCallCount() === 0 &&
+        mParts00.recordsTable.length === 0,
+    )
+  }
+
+  // G1.6: 31 de abril no Intl dateParts -> 503 timezone_unavailable e ZERO inserts
+  {
+    const april31Intl = {
+      DateTimeFormat: function () {
+        return {
+          formatToParts: () => [
+            { type: 'year', value: '2026' },
+            { type: 'month', value: '04' },
+            { type: 'day', value: '31' },
+          ],
+        }
+      },
+    }
+    const april31Handler = loadCandidateHandler({ Intl: april31Intl })
+    const mApril31 = createMockEvent({ body: validBasePayload })
+    april31Handler(mApril31.e)
+    const rApril31 = mApril31.getResult()
+    assert(
+      suiteName,
+      'Intl produz 31 de abril inválido para o mês -> retorna 503 timezone_unavailable e ZERO inserts',
+      rApril31?.statusCode === 503 &&
+        rApril31.body.error === 'timezone_unavailable' &&
+        mApril31.saveCallCount() === 0 &&
+        mApril31.recordsTable.length === 0,
+    )
+  }
+
+  // G1.7: 29 de fevereiro em ano não-bissexto (2025-02-29) -> 503 timezone_unavailable e ZERO inserts
+  {
+    const feb29NonLeapIntl = {
+      DateTimeFormat: function () {
+        return {
+          formatToParts: () => [
+            { type: 'year', value: '2025' },
+            { type: 'month', value: '02' },
+            { type: 'day', value: '29' },
+          ],
+        }
+      },
+    }
+    const feb29Handler = loadCandidateHandler({ Intl: feb29NonLeapIntl })
+    const mFeb29 = createMockEvent({ body: validBasePayload })
+    feb29Handler(mFeb29.e)
+    const rFeb29 = mFeb29.getResult()
+    assert(
+      suiteName,
+      'Intl produz 29 de fevereiro em ano não-bissexto (2025) -> retorna 503 timezone_unavailable e ZERO inserts',
+      rFeb29?.statusCode === 503 &&
+        rFeb29.body.error === 'timezone_unavailable' &&
+        mFeb29.saveCallCount() === 0 &&
+        mFeb29.recordsTable.length === 0,
+    )
+  }
+
+  // G1.8: Hora "24" gerada pelo runtime (sem normalização silenciosa para 0) -> 503 timezone_unavailable
+  {
+    const hour24Intl = {
+      DateTimeFormat: function (locale: string, opts?: { hour?: string }) {
+        return {
+          formatToParts: () => {
+            if (opts?.hour) {
+              return [
+                { type: 'day', value: '15' },
+                { type: 'month', value: '10' },
+                { type: 'year', value: '2026' },
+                { type: 'hour', value: '24' }, // Hora 24 anômala não-h23
+                { type: 'minute', value: '00' },
+                { type: 'second', value: '00' },
+              ]
+            }
+            return [
+              { type: 'year', value: '2026' },
+              { type: 'month', value: '10' },
+              { type: 'day', value: '15' },
+            ]
+          },
+        }
+      },
+    }
+    const hour24Handler = loadCandidateHandler({ Intl: hour24Intl })
+    const mHour24 = createMockEvent({ body: validBasePayload })
+    hour24Handler(mHour24.e)
+    const rHour24 = mHour24.getResult()
+    assert(
+      suiteName,
+      'Intl produz hora 24 (anomalia de hourCycle) -> nega estritamente com 503 sem normalização silenciosa',
+      rHour24?.statusCode === 503 &&
+        rHour24.body.error === 'timezone_unavailable' &&
+        mHour24.saveCallCount() === 0 &&
+        mHour24.recordsTable.length === 0,
+    )
+  }
+
+  // G1.9: Part duplicada (ex: dois years em dateParts) -> 503 timezone_unavailable
+  {
+    const duplicatePartIntl = {
+      DateTimeFormat: function () {
+        return {
+          formatToParts: () => [
+            { type: 'year', value: '2026' },
+            { type: 'year', value: '2026' }, // Duplicado!
+            { type: 'month', value: '10' },
+            { type: 'day', value: '15' },
+          ],
+        }
+      },
+    }
+    const duplicateHandler = loadCandidateHandler({ Intl: duplicatePartIntl })
+    const mDuplicate = createMockEvent({ body: validBasePayload })
+    duplicateHandler(mDuplicate.e)
+    const rDuplicate = mDuplicate.getResult()
+    assert(
+      suiteName,
+      'Intl produz part duplicada (counts !== 1) -> retorna 503 timezone_unavailable e ZERO inserts',
+      rDuplicate?.statusCode === 503 &&
+        rDuplicate.body.error === 'timezone_unavailable' &&
+        mDuplicate.saveCallCount() === 0 &&
+        mDuplicate.recordsTable.length === 0,
+    )
+  }
+
+  // G1.10: Part ausente (ex: falta 'second' em auditParts) -> 503 timezone_unavailable
+  {
+    const missingAuditPartIntl = {
+      DateTimeFormat: function (locale: string, opts?: { hour?: string }) {
+        return {
+          formatToParts: () => {
+            if (opts?.hour) {
+              return [
+                { type: 'day', value: '15' },
+                { type: 'month', value: '10' },
+                { type: 'year', value: '2026' },
+                { type: 'hour', value: '14' },
+                { type: 'minute', value: '30' },
+                // second ausente
+              ]
+            }
+            return [
+              { type: 'year', value: '2026' },
+              { type: 'month', value: '10' },
+              { type: 'day', value: '15' },
+            ]
+          },
+        }
+      },
+    }
+    const missingHandler = loadCandidateHandler({ Intl: missingAuditPartIntl })
+    const mMissing = createMockEvent({ body: validBasePayload })
+    missingHandler(mMissing.e)
+    const rMissing = mMissing.getResult()
+    assert(
+      suiteName,
+      'Intl com part obrigatória ausente em auditParts -> retorna 503 timezone_unavailable',
+      rMissing?.statusCode === 503 &&
+        rMissing.body.error === 'timezone_unavailable' &&
+        mMissing.saveCallCount() === 0 &&
+        mMissing.recordsTable.length === 0,
+    )
+  }
+
+  // G1.11: Divergência de YMD entre dateParts e auditParts gerados no MESMO instante -> 503 timezone_unavailable
+  {
+    const divergentYmdIntl = {
+      DateTimeFormat: function (locale: string, opts?: { hour?: string }) {
+        return {
+          formatToParts: () => {
+            if (opts?.hour) {
+              // auditParts alega dia 16
+              return [
+                { type: 'day', value: '16' },
+                { type: 'month', value: '10' },
+                { type: 'year', value: '2026' },
+                { type: 'hour', value: '00' },
+                { type: 'minute', value: '05' },
+                { type: 'second', value: '00' },
+              ]
+            }
+            // dateParts alega dia 15
+            return [
+              { type: 'year', value: '2026' },
+              { type: 'month', value: '10' },
+              { type: 'day', value: '15' },
+            ]
+          },
+        }
+      },
+    }
+    const divergentHandler = loadCandidateHandler({ Intl: divergentYmdIntl })
+    const mDivergent = createMockEvent({ body: validBasePayload })
+    divergentHandler(mDivergent.e)
+    const rDivergent = mDivergent.getResult()
+    assert(
+      suiteName,
+      'Divergência de YMD entre dateParts e auditParts do mesmo instante -> nega com 503 timezone_unavailable',
+      rDivergent?.statusCode === 503 &&
+        rDivergent.body.error === 'timezone_unavailable' &&
+        mDivergent.saveCallCount() === 0 &&
+        mDivergent.recordsTable.length === 0,
+    )
+  }
+
+  // G1.12: requestInstant não-finito (NaN / Infinity) -> 503 timezone_unavailable
+  {
+    class MockInvalidDate extends Date {
+      constructor(...args: unknown[]) {
+        if (args.length === 0) {
+          super(NaN)
+        } else {
+          // @ts-expect-error repassa construtor Date
+          super(...args)
+        }
+      }
+      getTime() {
+        return NaN
+      }
+    }
+    const invalidDateHandler = loadCandidateHandler({ Date: MockInvalidDate })
+    const mInvalidDate = createMockEvent({ body: validBasePayload })
+    invalidDateHandler(mInvalidDate.e)
+    const rInvalidDate = mInvalidDate.getResult()
+    assert(
+      suiteName,
+      'requestInstant com timestamp não-finito (NaN) -> retorna 503 timezone_unavailable antes de qualquer uso',
+      rInvalidDate?.statusCode === 503 &&
+        rInvalidDate.body.error === 'timezone_unavailable' &&
+        mInvalidDate.saveCallCount() === 0 &&
+        mInvalidDate.recordsTable.length === 0,
+    )
+  }
+
+  // G1.13: Caso positivo: Meia-noite BRT (00:00:00) válida aceita e auditada perfeitamente
+  {
+    class MockMidnightDate extends Date {
+      constructor(...args: unknown[]) {
+        if (args.length === 0) {
+          // 2026-10-15 00:00:00 BRT corresponde a 2026-10-15T03:00:00.000Z
+          super('2026-10-15T03:00:00.000Z')
+        } else {
+          // @ts-expect-error repassa construtor Date
+          super(...args)
+        }
+      }
+      static now() {
+        return new Date('2026-10-15T03:00:00.000Z').getTime()
+      }
+    }
+    const midnightHandler = loadCandidateHandler({ Date: MockMidnightDate })
+    const mMidnight = createMockEvent({
+      body: { ...validBasePayload, experienceDate: '2026-10-15' },
+    })
+    midnightHandler(mMidnight.e)
+    const rMidnight = mMidnight.getResult()
+    const recMidnight = mMidnight.recordsTable[0]
+    assert(
+      suiteName,
+      'Positivo: Meia-noite BRT (00:00:00) com hourCycle h23 aceita com 201 e registrada com sucesso',
+      rMidnight?.statusCode === 201 &&
+        rMidnight.body.success === true &&
+        recMidnight !== undefined &&
+        typeof recMidnight.received_at_sp === 'string' &&
+        recMidnight.received_at_sp.includes('00:00:00'),
+    )
+  }
+
+  // G1.14: Caso positivo: Ano bissexto válido no instante corrente (2024-02-29 no runtime) aceito
+  {
+    class MockLeapDayDate extends Date {
+      constructor(...args: unknown[]) {
+        if (args.length === 0) {
+          super('2024-02-29T15:00:00.000Z')
+        } else {
+          // @ts-expect-error repassa construtor Date
+          super(...args)
+        }
+      }
+      static now() {
+        return new Date('2024-02-29T15:00:00.000Z').getTime()
+      }
+    }
+    const leapDayHandler = loadCandidateHandler({ Date: MockLeapDayDate })
+    const mLeapDay = createMockEvent({
+      body: { ...validBasePayload, experienceDate: '2024-02-29' },
+    })
+    leapDayHandler(mLeapDay.e)
+    const rLeapDay = mLeapDay.getResult()
+    assert(
+      suiteName,
+      'Positivo: Ano bissexto válido (2024-02-29) validado por extractAndValidateParts sem rejeição falsa',
+      rLeapDay?.statusCode === 201 && rLeapDay.body.success === true,
+    )
+  }
+
   // =========================================================================
   // G2. FRONTEIRA UTC vs SP (instante próximo à meia-noite onde UTC difere de SP)
   // =========================================================================

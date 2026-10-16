@@ -40,12 +40,25 @@ routerAdd('POST', '/backend/v1/reports', function (e) {
     'v1.0-2026'
   ];
 
+  // Validação estrita inicial: requestInstant deve ser uma data válida e finita
+  if (
+    !(requestInstant instanceof Date) ||
+    typeof requestInstant.getTime !== 'function' ||
+    !isFinite(requestInstant.getTime())
+  ) {
+    return e.json(503, {
+      success: false,
+      error: 'timezone_unavailable'
+    });
+  }
+
   // =========================================================================
   // 1. RESOLUÇÃO E VALIDAÇÃO ESTREITA DE FUSO IANA (AMERICA/SAO_PAULO) VIA INTL
   // =========================================================================
-  // Se Intl não estiver disponível, lançar erro ou produzir parts incompletos/inválidos,
-  // responde 503 fail-closed com { success: false, error: 'timezone_unavailable' }
-  // ANTES de qualquer consulta de idempotência ou escrita no banco de dados.
+  // Se Intl não estiver disponível, lançar erro ou produzir parts incompletos,
+  // malformados, duplicados, fora de range ou incoerentes, responde 503 fail-closed com
+  // { success: false, error: 'timezone_unavailable' } ANTES de qualquer escrita/idempotência.
+  // SEM nenhum fallback UTC fixo ou aritmético — o 503 fail-closed é o único caminho.
   var todaySpString = '';
   var formattedReceivedAtSp = '';
   var receivedAtIsoUtc = '';
@@ -58,6 +71,110 @@ routerAdd('POST', '/backend/v1/reports', function (e) {
       });
     }
 
+    // Helper rigoroso para extração e validação de parts de Intl
+    // Garante:
+    // 1. Exatamente UMA ocorrência de cada part obrigatório (sem duplicata nem ausência)
+    // 2. Formato e largura estrita de dígitos
+    // 3. Validação real de ranges: ano 1900-2100, mês 1-12, dia válido no mês com bissexto gregoriano,
+    //    hora 0-23, minuto 0-59, segundo 0-59
+    // 4. Se hora 24 aparecer, rejeita estritamente (NUNCA normaliza 24 para 0)
+    function extractAndValidateParts(parts, requiredTypes) {
+      if (!Array.isArray(parts)) {
+        return null;
+      }
+
+      var counts = {};
+      var values = {};
+
+      for (var p = 0; p < parts.length; p++) {
+        var item = parts[p];
+        if (!item || typeof item.type !== 'string' || typeof item.value !== 'string') {
+          return null;
+        }
+        // Parts literais de formatação (ex: /, :, espaço) são ignorados na contagem de campos de data/hora
+        if (item.type === 'literal') {
+          continue;
+        }
+
+        counts[item.type] = (counts[item.type] || 0) + 1;
+        values[item.type] = item.value;
+      }
+
+      // Validação de unicidade e presença de cada part requerido
+      for (var r = 0; r < requiredTypes.length; r++) {
+        var reqType = requiredTypes[r];
+        if (counts[reqType] !== 1) {
+          return null;
+        }
+      }
+
+      // Validação estrita de cada part presente
+      var yStr = values.year;
+      var mStr = values.month;
+      var dStr = values.day;
+
+      if (!/^\d{4}$/.test(yStr) || !/^\d{2}$/.test(mStr) || !/^\d{2}$/.test(dStr)) {
+        return null;
+      }
+
+      var y = parseInt(yStr, 10);
+      var m = parseInt(mStr, 10);
+      var d = parseInt(dStr, 10);
+
+      if (y < 1900 || y > 2100 || m < 1 || m > 12) {
+        return null;
+      }
+
+      var isLeap = (y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0);
+      var daysInMonth = [31, isLeap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+      if (d < 1 || d > daysInMonth[m - 1]) {
+        return null;
+      }
+
+      var result = {
+        year: yStr,
+        month: mStr,
+        day: dStr,
+        yearNum: y,
+        monthNum: m,
+        dayNum: d
+      };
+
+      // Se requerido tempo (hour, minute, second)
+      if (
+        counts.hour !== undefined ||
+        counts.minute !== undefined ||
+        counts.second !== undefined
+      ) {
+        var hStr = values.hour;
+        var minStr = values.minute;
+        var sStr = values.second;
+
+        if (!/^\d{2}$/.test(hStr) || !/^\d{2}$/.test(minStr) || !/^\d{2}$/.test(sStr)) {
+          return null;
+        }
+
+        // Se o runtime produzir hora "24" (ex.: hourCycle não honrado ou formato Goja peculiar),
+        // deve falhar imediatamente. NUNCA normalizar 24 para 0.
+        var h = parseInt(hStr, 10);
+        var min = parseInt(minStr, 10);
+        var s = parseInt(sStr, 10);
+
+        if (h < 0 || h > 23 || min < 0 || min > 59 || s < 0 || s > 59) {
+          return null;
+        }
+
+        result.hour = hStr;
+        result.minute = minStr;
+        result.second = sStr;
+        result.hourNum = h;
+        result.minuteNum = min;
+        result.secondNum = s;
+      }
+
+      return result;
+    }
+
     // Resolvendo data civil de hoje (AAAA-MM-DD) via parts tipados
     var dtfDate = new Intl.DateTimeFormat('en-US', {
       timeZone: 'America/Sao_Paulo',
@@ -66,28 +183,16 @@ routerAdd('POST', '/backend/v1/reports', function (e) {
       day: '2-digit'
     });
     var dateParts = dtfDate.formatToParts(requestInstant);
-    var pYear = '';
-    var pMonth = '';
-    var pDay = '';
-    for (var i = 0; i < dateParts.length; i++) {
-      if (dateParts[i].type === 'year') pYear = dateParts[i].value;
-      if (dateParts[i].type === 'month') pMonth = dateParts[i].value;
-      if (dateParts[i].type === 'day') pDay = dateParts[i].value;
-    }
-
-    if (
-      !/^\d{4}$/.test(pYear) ||
-      !/^\d{2}$/.test(pMonth) ||
-      !/^\d{2}$/.test(pDay)
-    ) {
+    var validatedDate = extractAndValidateParts(dateParts, ['year', 'month', 'day']);
+    if (!validatedDate) {
       return e.json(503, {
         success: false,
         error: 'timezone_unavailable'
       });
     }
-    todaySpString = pYear + '-' + pMonth + '-' + pDay;
+    todaySpString = validatedDate.year + '-' + validatedDate.month + '-' + validatedDate.day;
 
-    // Resolvendo timestamp de auditoria via parts tipados
+    // Resolvendo timestamp de auditoria via parts tipados com hourCycle 'h23' sem hour12 conflitante
     var dtfAudit = new Intl.DateTimeFormat('pt-BR', {
       timeZone: 'America/Sao_Paulo',
       year: 'numeric',
@@ -96,31 +201,22 @@ routerAdd('POST', '/backend/v1/reports', function (e) {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
-      hour12: false
+      hourCycle: 'h23'
     });
     var auditParts = dtfAudit.formatToParts(requestInstant);
-    var aYear = '';
-    var aMonth = '';
-    var aDay = '';
-    var aHour = '';
-    var aMinute = '';
-    var aSecond = '';
-    for (var j = 0; j < auditParts.length; j++) {
-      if (auditParts[j].type === 'year') aYear = auditParts[j].value;
-      if (auditParts[j].type === 'month') aMonth = auditParts[j].value;
-      if (auditParts[j].type === 'day') aDay = auditParts[j].value;
-      if (auditParts[j].type === 'hour') aHour = auditParts[j].value;
-      if (auditParts[j].type === 'minute') aMinute = auditParts[j].value;
-      if (auditParts[j].type === 'second') aSecond = auditParts[j].value;
+    var validatedAudit = extractAndValidateParts(auditParts, ['year', 'month', 'day', 'hour', 'minute', 'second']);
+    if (!validatedAudit) {
+      return e.json(503, {
+        success: false,
+        error: 'timezone_unavailable'
+      });
     }
 
+    // Divergência de YMD entre dateParts e auditParts derivados do MESMO instante server-side -> falha do gate
     if (
-      !/^\d{4}$/.test(aYear) ||
-      !/^\d{2}$/.test(aMonth) ||
-      !/^\d{2}$/.test(aDay) ||
-      !/^\d{2}$/.test(aHour) ||
-      !/^\d{2}$/.test(aMinute) ||
-      !/^\d{2}$/.test(aSecond)
+      validatedDate.year !== validatedAudit.year ||
+      validatedDate.month !== validatedAudit.month ||
+      validatedDate.day !== validatedAudit.day
     ) {
       return e.json(503, {
         success: false,
@@ -128,7 +224,7 @@ routerAdd('POST', '/backend/v1/reports', function (e) {
       });
     }
 
-    formattedReceivedAtSp = aDay + '/' + aMonth + '/' + aYear + ' às ' + aHour + ':' + aMinute + ':' + aSecond + ' (America/Sao_Paulo)';
+    formattedReceivedAtSp = validatedAudit.day + '/' + validatedAudit.month + '/' + validatedAudit.year + ' às ' + validatedAudit.hour + ':' + validatedAudit.minute + ':' + validatedAudit.second + ' (America/Sao_Paulo)';
     receivedAtIsoUtc = requestInstant.toISOString();
   } catch (_) {
     return e.json(503, {

@@ -139,6 +139,12 @@ Esta seção documenta com rigor auditável o estado técnico, de governança e 
         - Gate de fuso Intl ausente -> 503 com zero insert;
         - Gate de fuso Intl lança erro -> 503 com zero insert;
         - Gate de fuso formatToParts com parts ruins/incompletos -> 503 com zero insert;
+        - Endurecimento de parts de Intl: rejeição de parts 99 (mês, dia, hora), parts "00", 31 de abril, 29 de fevereiro não-bissexto;
+        - Rejeição estrita de hora 24 com 503 sem normalização silenciosa para 0;
+        - Rejeição de part duplicada e part obrigatória ausente;
+        - Rejeição de divergência YMD entre dateParts e auditParts gerados no mesmo instante server-side;
+        - Validação de requestInstant finito (rejeição de NaN/Infinity com 503);
+        - Positivos: meia-noite BRT (00:00:00 com hourCycle h23), fronteira UTC/BRT e ano bissexto válido (29/02/2024);
         - Fronteira UTC/BRT: instante onde é dia X em UTC mas dia X-1 em SP (rejeição de data futura em SP);
         - Rejeição estrita de date-only com espaços em qualquer posição ("2025-01-15 ", " 2025-01-15", "2025- 01-15") com 400;
         - termsVersion fora da lista -> 400; termsVersion da lista (`v1.0-2025`, `v1.0-2026`) -> 201;
