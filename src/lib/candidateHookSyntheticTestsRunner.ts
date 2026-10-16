@@ -52,9 +52,11 @@ function createMockEvent(opts: MockEventOptions): {
   e: Record<string, unknown>
   recordsTable: MockRecordData[]
   getResult: () => MockEventResult | null
+  saveCallCount: () => number
 } {
   const recordsTable: MockRecordData[] = opts.existingRecords ? [...opts.existingRecords] : []
   let result: MockEventResult | null = null
+  let savesCount = 0
 
   const app = {
     findRecordsByFilter: (
@@ -84,6 +86,7 @@ function createMockEvent(opts: MockEventOptions): {
       return { id: 'col_reports_01', name }
     },
     save: (recordInstance: { data: MockRecordData }) => {
+      savesCount++
       if (opts.throwOnSave) {
         if (opts.saveFailIsUnique) {
           throw new Error('UNIQUE constraint failed: reports.idempotency_key')
@@ -112,6 +115,7 @@ function createMockEvent(opts: MockEventOptions): {
     e,
     recordsTable,
     getResult: () => result,
+    saveCallCount: () => savesCount,
   }
 }
 
@@ -131,7 +135,9 @@ class MockRecord {
 }
 
 // Avalia a fonte exata do candidato capturando a rota registrada
-function loadCandidateHandler(): (e: Record<string, unknown>) => unknown {
+function loadCandidateHandler(
+  customScope?: Record<string, unknown>,
+): (e: Record<string, unknown>) => unknown {
   let registeredHandler: ((e: Record<string, unknown>) => unknown) | null = null
 
   const mockRouterAdd = (
@@ -144,9 +150,11 @@ function loadCandidateHandler(): (e: Record<string, unknown>) => unknown {
     }
   }
 
-  // Avalia o código em função isolada
-  const runner = new Function('routerAdd', 'Record', candidateHookSource)
-  runner(mockRouterAdd, MockRecord)
+  const scopeKeys = customScope ? Object.keys(customScope) : []
+  const scopeValues = customScope ? Object.values(customScope) : []
+
+  const runner = new Function('routerAdd', 'Record', ...scopeKeys, candidateHookSource)
+  runner(mockRouterAdd, MockRecord, ...scopeValues)
 
   if (!registeredHandler) {
     throw new Error('Candidato não registrou POST /backend/v1/reports')
@@ -171,23 +179,310 @@ export async function runCandidateHookSyntheticTests(): Promise<CandidateHookSui
     }
   }
 
-  const handler = loadCandidateHandler()
+  const defaultHandler = loadCandidateHandler()
   const suiteName = 'Candidate Hook Raw Source (.js.txt via mock harness)'
+
+  // Instante controlado: hoje no Brasil (America/Sao_Paulo)
+  // Calculamos a data de hoje corrente em SP para payload base válido
+  const dtfSpToday = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+  const spParts = dtfSpToday.formatToParts(new Date())
+  let spYear = ''
+  let spMonth = ''
+  let spDay = ''
+  for (const p of spParts) {
+    if (p.type === 'year') spYear = p.value
+    if (p.type === 'month') spMonth = p.value
+    if (p.type === 'day') spDay = p.value
+  }
+  const todaySpDateString = `${spYear}-${spMonth}-${spDay}`
 
   const validBasePayload = {
     idempotencyKey: 'E2E_SYNTH_RAW_KEY_12345',
     clientName: 'E2E_SYNTH_Cliente_Valido',
     relato: 'Atendimento jurídico impecável e transparente.',
-    experienceDate: '2026-10-15',
+    experienceDate: todaySpDateString,
     consentGiven: true,
     termsVersion: 'v1.0-2026',
   }
 
-  // 1. Rejeição de corpo inválido (Array, Null, Primitivo string/number)
+  // =========================================================================
+  // G1. GATE DE FUSO E INTL: Respostas 503 fail-closed com zero inserts
+  // =========================================================================
+
+  // G1.1: Intl ausente -> 503 com zero insert
+  {
+    const noIntlHandler = loadCandidateHandler({ Intl: undefined })
+    const mNoIntl = createMockEvent({ body: validBasePayload })
+    noIntlHandler(mNoIntl.e)
+    const rNoIntl = mNoIntl.getResult()
+    assert(
+      suiteName,
+      'Intl ausente -> retorna 503 timezone_unavailable e ZERO inserts',
+      rNoIntl?.statusCode === 503 &&
+        rNoIntl.body.error === 'timezone_unavailable' &&
+        mNoIntl.saveCallCount() === 0 &&
+        mNoIntl.recordsTable.length === 0,
+    )
+  }
+
+  // G1.2: Intl lança erro -> 503 com zero insert
+  {
+    const throwingIntl = {
+      DateTimeFormat: function () {
+        throw new Error('Unsupported timeZone America/Sao_Paulo')
+      },
+    }
+    const throwingIntlHandler = loadCandidateHandler({ Intl: throwingIntl })
+    const mThrowIntl = createMockEvent({ body: validBasePayload })
+    throwingIntlHandler(mThrowIntl.e)
+    const rThrowIntl = mThrowIntl.getResult()
+    assert(
+      suiteName,
+      'Intl lança erro -> retorna 503 timezone_unavailable e ZERO inserts',
+      rThrowIntl?.statusCode === 503 &&
+        rThrowIntl.body.error === 'timezone_unavailable' &&
+        mThrowIntl.saveCallCount() === 0 &&
+        mThrowIntl.recordsTable.length === 0,
+    )
+  }
+
+  // G1.3: formatToParts retorna parts incompletos/ruins -> 503 com zero insert
+  {
+    const badPartsIntl = {
+      DateTimeFormat: function () {
+        return {
+          formatToParts: () => [
+            { type: 'literal', value: '/' },
+            { type: 'month', value: '10' }, // falta year e day
+          ],
+        }
+      },
+    }
+    const badPartsHandler = loadCandidateHandler({ Intl: badPartsIntl })
+    const mBadParts = createMockEvent({ body: validBasePayload })
+    badPartsHandler(mBadParts.e)
+    const rBadParts = mBadParts.getResult()
+    assert(
+      suiteName,
+      'Intl com parts incompletos -> retorna 503 timezone_unavailable e ZERO inserts',
+      rBadParts?.statusCode === 503 &&
+        rBadParts.body.error === 'timezone_unavailable' &&
+        mBadParts.saveCallCount() === 0 &&
+        mBadParts.recordsTable.length === 0,
+    )
+  }
+
+  // =========================================================================
+  // G2. FRONTEIRA UTC vs SP (instante próximo à meia-noite onde UTC difere de SP)
+  // =========================================================================
+  {
+    // Exemplo: 2026-03-15T01:30:00Z -> em UTC é 2026-03-15, mas em SP (UTC-3) são 22:30 de 2026-03-14
+    class MockDateBorder extends Date {
+      constructor(...args: unknown[]) {
+        if (args.length === 0) {
+          super('2026-03-15T01:30:00.000Z')
+        } else {
+          // @ts-expect-error repassa construtor Date
+          super(...args)
+        }
+      }
+      static now() {
+        return new Date('2026-03-15T01:30:00.000Z').getTime()
+      }
+    }
+    const borderHandler = loadCandidateHandler({ Date: MockDateBorder })
+
+    // Se o cliente enviar 2026-03-15, mas em SP ainda for 2026-03-14: deve ser rejeitado como data futura!
+    const mBorderFuture = createMockEvent({
+      body: { ...validBasePayload, experienceDate: '2026-03-15' },
+    })
+    borderHandler(mBorderFuture.e)
+    const rBorderFuture = mBorderFuture.getResult()
+    assert(
+      suiteName,
+      'Fronteira UTC/SP: rejeita data que é hoje em UTC mas futura em SP (2026-03-15)',
+      rBorderFuture?.statusCode === 400 && rBorderFuture.body.success === false,
+    )
+
+    // Se o cliente enviar 2026-03-14 (que é hoje em SP): aceita com 201
+    const mBorderCurrent = createMockEvent({
+      body: { ...validBasePayload, experienceDate: '2026-03-14' },
+    })
+    borderHandler(mBorderCurrent.e)
+    const rBorderCurrent = mBorderCurrent.getResult()
+    assert(
+      suiteName,
+      'Fronteira UTC/SP: aceita data corrente civil em SP (2026-03-14) com 201',
+      rBorderCurrent?.statusCode === 201 && rBorderCurrent.body.success === true,
+    )
+  }
+
+  // =========================================================================
+  // G3. Rejeição de date-only com espaços em qualquer posição (fail-closed, sem trim)
+  // =========================================================================
+  {
+    // Espaço no fim "2025-01-15 "
+    const mSpaceEnd = createMockEvent({
+      body: { ...validBasePayload, experienceDate: '2025-01-15 ' },
+    })
+    defaultHandler(mSpaceEnd.e)
+    const rSpaceEnd = mSpaceEnd.getResult()
+    assert(
+      suiteName,
+      'Rejeita experienceDate com espaço no final ("2025-01-15 ") com 400 sem trim permissivo',
+      rSpaceEnd?.statusCode === 400 && rSpaceEnd.body.success === false,
+    )
+
+    // Espaço no início " 2025-01-15"
+    const mSpaceStart = createMockEvent({
+      body: { ...validBasePayload, experienceDate: ' 2025-01-15' },
+    })
+    defaultHandler(mSpaceStart.e)
+    const rSpaceStart = mSpaceStart.getResult()
+    assert(
+      suiteName,
+      'Rejeita experienceDate com espaço no início (" 2025-01-15") com 400',
+      rSpaceStart?.statusCode === 400 && rSpaceStart.body.success === false,
+    )
+
+    // Espaço no meio "2025- 01-15"
+    const mSpaceMid = createMockEvent({
+      body: { ...validBasePayload, experienceDate: '2025- 01-15' },
+    })
+    defaultHandler(mSpaceMid.e)
+    const rSpaceMid = mSpaceMid.getResult()
+    assert(
+      suiteName,
+      'Rejeita experienceDate com espaço intermediário ("2025- 01-15") com 400',
+      rSpaceMid?.statusCode === 400 && rSpaceMid.body.success === false,
+    )
+  }
+
+  // =========================================================================
+  // G4. termsVersion na lista vs fora da lista (v1.0-2025, v1.0-2026)
+  // =========================================================================
+  {
+    // Fora da lista
+    const mBadTerms = createMockEvent({
+      body: { ...validBasePayload, termsVersion: 'v9.9-inventada' },
+    })
+    defaultHandler(mBadTerms.e)
+    const rBadTerms = mBadTerms.getResult()
+    assert(
+      suiteName,
+      'Rejeita termsVersion fora da lista permitida (v9.9-inventada) com 400',
+      rBadTerms?.statusCode === 400 && rBadTerms.body.success === false,
+    )
+
+    // Na lista: v1.0-2025
+    const mTerms2025 = createMockEvent({
+      body: { ...validBasePayload, termsVersion: 'v1.0-2025' },
+    })
+    defaultHandler(mTerms2025.e)
+    const rTerms2025 = mTerms2025.getResult()
+    assert(
+      suiteName,
+      'Aceita termsVersion oficial v1.0-2025 com 201',
+      rTerms2025?.statusCode === 201 && rTerms2025.body.success === true,
+    )
+
+    // Na lista: v1.0-2026
+    const mTerms2026 = createMockEvent({
+      body: { ...validBasePayload, termsVersion: 'v1.0-2026' },
+    })
+    defaultHandler(mTerms2026.e)
+    const rTerms2026 = mTerms2026.getResult()
+    assert(
+      suiteName,
+      'Aceita termsVersion oficial v1.0-2026 com 201',
+      rTerms2026?.statusCode === 201 && rTerms2026.body.success === true,
+    )
+  }
+
+  // =========================================================================
+  // G5. Ausência de ReferenceError no insert (cleanTermsVersion gravado com sucesso)
+  // =========================================================================
+  {
+    const mInsert = createMockEvent({
+      body: { ...validBasePayload, termsVersion: 'v1.0-2026' },
+    })
+    defaultHandler(mInsert.e)
+    const rInsert = mInsert.getResult()
+    const insertedRecord = mInsert.recordsTable[0]
+    assert(
+      suiteName,
+      'Insert grava terms_version com valor de cleanTermsVersion sem ReferenceError',
+      rInsert?.statusCode === 201 &&
+        insertedRecord !== undefined &&
+        insertedRecord.terms_version === 'v1.0-2026',
+    )
+  }
+
+  // =========================================================================
+  // G6. Validação de calendário estrito (29fev em ano bissexto vs não-bissexto, 31abr, futuro)
+  // =========================================================================
+  {
+    // 29 de fev de 2025 (ano não bissexto) -> 400
+    const m29FevNaoBissexto = createMockEvent({
+      body: { ...validBasePayload, experienceDate: '2025-02-29' },
+    })
+    defaultHandler(m29FevNaoBissexto.e)
+    const r29FevNaoBissexto = m29FevNaoBissexto.getResult()
+    assert(
+      suiteName,
+      'Rejeita 2025-02-29 (fevereiro em ano não-bissexto) com 400',
+      r29FevNaoBissexto?.statusCode === 400 && r29FevNaoBissexto.body.success === false,
+    )
+
+    // 29 de fev de 2024 (ano bissexto válido) -> 201
+    const m29FevBissexto = createMockEvent({
+      body: { ...validBasePayload, experienceDate: '2024-02-29' },
+    })
+    defaultHandler(m29FevBissexto.e)
+    const r29FevBissexto = m29FevBissexto.getResult()
+    assert(
+      suiteName,
+      'Aceita 2024-02-29 (fevereiro em ano bissexto no passado) com 201',
+      r29FevBissexto?.statusCode === 201 && r29FevBissexto.body.success === true,
+    )
+
+    // 31 de abril (mês de 30 dias) -> 400
+    const m31Abr = createMockEvent({
+      body: { ...validBasePayload, experienceDate: '2024-04-31' },
+    })
+    defaultHandler(m31Abr.e)
+    const r31Abr = m31Abr.getResult()
+    assert(
+      suiteName,
+      'Rejeita 2024-04-31 (abril tem 30 dias) com 400',
+      r31Abr?.statusCode === 400 && r31Abr.body.success === false,
+    )
+
+    // Data futura no calendário (ano 2099)
+    const mFuture = createMockEvent({
+      body: { ...validBasePayload, experienceDate: '2099-12-31' },
+    })
+    defaultHandler(mFuture.e)
+    const rFuture = mFuture.getResult()
+    assert(
+      suiteName,
+      'Rejeita data futura em relação a São Paulo com 400',
+      rFuture?.statusCode === 400 && rFuture.body.success === false,
+    )
+  }
+
+  // =========================================================================
+  // G7. Rejeição de corpo inválido (Array, Null, Primitivo string/number)
+  // =========================================================================
   {
     // Array
     const mArray = createMockEvent({ body: [1, 2, 3] })
-    handler(mArray.e)
+    defaultHandler(mArray.e)
     const rArray = mArray.getResult()
     assert(
       suiteName,
@@ -197,7 +492,7 @@ export async function runCandidateHookSyntheticTests(): Promise<CandidateHookSui
 
     // Null
     const mNull = createMockEvent({ body: null })
-    handler(mNull.e)
+    defaultHandler(mNull.e)
     const rNull = mNull.getResult()
     assert(
       suiteName,
@@ -207,7 +502,7 @@ export async function runCandidateHookSyntheticTests(): Promise<CandidateHookSui
 
     // String primitiva
     const mStr = createMockEvent({ body: 'invalid-string-payload' })
-    handler(mStr.e)
+    defaultHandler(mStr.e)
     const rStr = mStr.getResult()
     assert(
       suiteName,
@@ -216,11 +511,13 @@ export async function runCandidateHookSyntheticTests(): Promise<CandidateHookSui
     )
   }
 
-  // 2. Consentimento estritamente true (rejeita false, ausente, truthy coercivo)
+  // =========================================================================
+  // G8. Consentimento estritamente true (rejeita false, ausente, truthy coercivo)
+  // =========================================================================
   {
     // false
     const mFalse = createMockEvent({ body: { ...validBasePayload, consentGiven: false } })
-    handler(mFalse.e)
+    defaultHandler(mFalse.e)
     const rFalse = mFalse.getResult()
     assert(
       suiteName,
@@ -232,7 +529,7 @@ export async function runCandidateHookSyntheticTests(): Promise<CandidateHookSui
     const noConsentPayload = { ...validBasePayload }
     delete (noConsentPayload as Record<string, unknown>).consentGiven
     const mUndef = createMockEvent({ body: noConsentPayload })
-    handler(mUndef.e)
+    defaultHandler(mUndef.e)
     const rUndef = mUndef.getResult()
     assert(
       suiteName,
@@ -242,7 +539,7 @@ export async function runCandidateHookSyntheticTests(): Promise<CandidateHookSui
 
     // truthy coercivo (string "true" ou 1)
     const mCoercive = createMockEvent({ body: { ...validBasePayload, consentGiven: 'true' } })
-    handler(mCoercive.e)
+    defaultHandler(mCoercive.e)
     const rCoercive = mCoercive.getResult()
     assert(
       suiteName,
@@ -251,73 +548,9 @@ export async function runCandidateHookSyntheticTests(): Promise<CandidateHookSui
     )
   }
 
-  // 3. termsVersion deve pertencer à lista oficial permitida
-  {
-    const mBadTerms = createMockEvent({
-      body: { ...validBasePayload, termsVersion: 'v9.9-inventada' },
-    })
-    handler(mBadTerms.e)
-    const rBadTerms = mBadTerms.getResult()
-    assert(
-      suiteName,
-      'Rejeita termsVersion fora da lista permitida com 400',
-      rBadTerms?.statusCode === 400 && rBadTerms.body.success === false,
-    )
-
-    const mGoodTerms = createMockEvent({
-      body: { ...validBasePayload, termsVersion: 'v1.0-2026' },
-    })
-    handler(mGoodTerms.e)
-    const rGoodTerms = mGoodTerms.getResult()
-    assert(
-      suiteName,
-      'Aceita termsVersion na lista permitida (v1.0-2026) com 201',
-      rGoodTerms?.statusCode === 201 && rGoodTerms.body.success === true,
-    )
-  }
-
-  // 4. Validação de calendário estrito (29fev em ano comum, 31abr, datas futuras)
-  {
-    // 29 de fev de 2025 (ano não bissexto)
-    const m29Fev = createMockEvent({
-      body: { ...validBasePayload, experienceDate: '2025-02-29' },
-    })
-    handler(m29Fev.e)
-    const r29Fev = m29Fev.getResult()
-    assert(
-      suiteName,
-      'Rejeita 2025-02-29 (fevereiro não-bissexto) com 400',
-      r29Fev?.statusCode === 400 && r29Fev.body.success === false,
-    )
-
-    // 31 de abril
-    const m31Abr = createMockEvent({
-      body: { ...validBasePayload, experienceDate: '2026-04-31' },
-    })
-    handler(m31Abr.e)
-    const r31Abr = m31Abr.getResult()
-    assert(
-      suiteName,
-      'Rejeita 2026-04-31 (abril tem 30 dias) com 400',
-      r31Abr?.statusCode === 400 && r31Abr.body.success === false,
-    )
-
-    // Data futura no calendário (ano 2099)
-    const mFuture = createMockEvent({
-      body: { ...validBasePayload, experienceDate: '2099-12-31' },
-    })
-    handler(mFuture.e)
-    const rFuture = mFuture.getResult()
-    assert(
-      suiteName,
-      'Rejeita data futura em relação a São Paulo com 400',
-      rFuture?.statusCode === 400 && rFuture.body.success === false,
-    )
-  }
-
-  // 5. Tratamento de UNIQUE seguro:
-  // - Catch de UNIQUE com registro existente confirmado com a MESMA chave -> 201 canônico
-  // - Catch de UNIQUE com falha de leitura ou registro não confirmado -> 500 internal_error
+  // =========================================================================
+  // G9. Tratamento de UNIQUE seguro pós-conflito
+  // =========================================================================
   {
     // Caso A: Save lança erro de UNIQUE, e reconsulta CONFIRMA a mesma chave existente
     const mUniqueConfirm = createMockEvent({
@@ -331,7 +564,7 @@ export async function runCandidateHookSyntheticTests(): Promise<CandidateHookSui
         },
       ],
     })
-    handler(mUniqueConfirm.e)
+    defaultHandler(mUniqueConfirm.e)
     const rUniqueConfirm = mUniqueConfirm.getResult()
     assert(
       suiteName,
@@ -350,7 +583,7 @@ export async function runCandidateHookSyntheticTests(): Promise<CandidateHookSui
       throwOnConfirmFind: true, // simula falha ao reler banco
       existingRecords: [],
     })
-    handler(mUniqueFail.e)
+    defaultHandler(mUniqueFail.e)
     const rUniqueFail = mUniqueFail.getResult()
     assert(
       suiteName,
@@ -361,14 +594,16 @@ export async function runCandidateHookSyntheticTests(): Promise<CandidateHookSui
     )
   }
 
-  // 6. Limiter fail-closed: IP inválido ou falha na consulta de taxa -> 429 rate_limited
+  // =========================================================================
+  // G10. Limiter fail-closed
+  // =========================================================================
   {
     // IP ausente ou em branco
     const mNoIp = createMockEvent({
       clientIp: '   ',
       body: validBasePayload,
     })
-    handler(mNoIp.e)
+    defaultHandler(mNoIp.e)
     const rNoIp = mNoIp.getResult()
     assert(
       suiteName,
@@ -381,7 +616,7 @@ export async function runCandidateHookSyntheticTests(): Promise<CandidateHookSui
       body: validBasePayload,
       throwOnFindRecent: true,
     })
-    handler(mCrashDb.e)
+    defaultHandler(mCrashDb.e)
     const rCrashDb = mCrashDb.getResult()
     assert(
       suiteName,

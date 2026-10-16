@@ -15,30 +15,130 @@
  * 3. GATES DECLARADOS NESTE ARQUIVO (NÃO ULTRAPASSADOS):
  *    - GATE DE TIMEZONE: O runtime Goja (motor ECMAScript em Go do PocketBase) NÃO
  *      possui garantia nativa de implementação completa de Intl.DateTimeFormat com fuso IANA
- *      arbitrário sem flag específica em Go. Declaramos duas alternativas:
- *      (A) Intl comprovado em Goja com timeZone: 'America/Sao_Paulo';
- *      (B) Tabela histórica de transições de Horário de Verão do Brasil (Decretos Federais).
- *      Se nenhuma for comprovada no host, opera-se sob o GATE DE FUSO declarado,
- *      sem fingir conformidade histórica nem impor UTC-3 civil fixo como regra perene.
+ *      arbitrário sem compilação específica no host Go.
+ *      Se Intl.DateTimeFormat com timeZone 'America/Sao_Paulo' não estiver disponível,
+ *      lançar erro, ou produzir parts incompletos/inválidos, o handler interrompe
+ *      imediatamente com resposta 503 constante { success: false, error: 'timezone_unavailable' }
+ *      ANTES de qualquer verificação de idempotência que grave ou inserção de registro.
+ *      Todos os fallbacks aritméticos UTC-3 foram estritamente removidos.
  *    - GATE DE RATE LIMITING: O rate limiter atual é fail-closed, mas opera com contagem
  *      global/por chave derivada. Fontes de IP confiáveis (cabeçalhos de proxy do ingress),
  *      HMAC com segredo gerenciado e política de retenção de janelas são GATES. Não se inventa
  *      segredo em código e não se armazena IP bruto nem hash simples ("anonimização ilusória").
- *    - GATE DE STAFF: O acesso à listagem e administração de relatos continua stritamente privado
+ *    - GATE DE STAFF: O acesso à listagem e administração de relatos continua estritamente privado
  *      (listRule/viewRule = null). Usuários genéricos autenticados (@request.auth.id != '') e
  *      domínios de e-mail puros NÃO possuem autorização de equipe.
  */
 
-// Lista explícita e imutável de versões de termos aceitas pelo cartório ético do escritório
-var ALLOWED_TERMS_VERSIONS = [
-  'v1.0-2025',
-  'v1.0-2026',
-  'v1.1-2026'
-];
-
 routerAdd('POST', '/backend/v1/reports', function (e) {
+  // Captura de instante server-side ÚNICO no início da requisição, reusado em todo o fluxo
+  var requestInstant = new Date();
+
+  // Lista de versões de termos aceitas pelo fluxo frontend atual (sem alegação de aprovação formal)
+  var ALLOWED_TERMS_VERSIONS = [
+    'v1.0-2025',
+    'v1.0-2026'
+  ];
+
   // =========================================================================
-  // 1. RATE LIMITER COM GATE DEFAULT-DENY (FAIL-CLOSED)
+  // 1. RESOLUÇÃO E VALIDAÇÃO ESTREITA DE FUSO IANA (AMERICA/SAO_PAULO) VIA INTL
+  // =========================================================================
+  // Se Intl não estiver disponível, lançar erro ou produzir parts incompletos/inválidos,
+  // responde 503 fail-closed com { success: false, error: 'timezone_unavailable' }
+  // ANTES de qualquer consulta de idempotência ou escrita no banco de dados.
+  var todaySpString = '';
+  var formattedReceivedAtSp = '';
+  var receivedAtIsoUtc = '';
+
+  try {
+    if (typeof Intl === 'undefined' || !Intl.DateTimeFormat) {
+      return e.json(503, {
+        success: false,
+        error: 'timezone_unavailable'
+      });
+    }
+
+    // Resolvendo data civil de hoje (AAAA-MM-DD) via parts tipados
+    var dtfDate = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    var dateParts = dtfDate.formatToParts(requestInstant);
+    var pYear = '';
+    var pMonth = '';
+    var pDay = '';
+    for (var i = 0; i < dateParts.length; i++) {
+      if (dateParts[i].type === 'year') pYear = dateParts[i].value;
+      if (dateParts[i].type === 'month') pMonth = dateParts[i].value;
+      if (dateParts[i].type === 'day') pDay = dateParts[i].value;
+    }
+
+    if (
+      !/^\d{4}$/.test(pYear) ||
+      !/^\d{2}$/.test(pMonth) ||
+      !/^\d{2}$/.test(pDay)
+    ) {
+      return e.json(503, {
+        success: false,
+        error: 'timezone_unavailable'
+      });
+    }
+    todaySpString = pYear + '-' + pMonth + '-' + pDay;
+
+    // Resolvendo timestamp de auditoria via parts tipados
+    var dtfAudit = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
+    var auditParts = dtfAudit.formatToParts(requestInstant);
+    var aYear = '';
+    var aMonth = '';
+    var aDay = '';
+    var aHour = '';
+    var aMinute = '';
+    var aSecond = '';
+    for (var j = 0; j < auditParts.length; j++) {
+      if (auditParts[j].type === 'year') aYear = auditParts[j].value;
+      if (auditParts[j].type === 'month') aMonth = auditParts[j].value;
+      if (auditParts[j].type === 'day') aDay = auditParts[j].value;
+      if (auditParts[j].type === 'hour') aHour = auditParts[j].value;
+      if (auditParts[j].type === 'minute') aMinute = auditParts[j].value;
+      if (auditParts[j].type === 'second') aSecond = auditParts[j].value;
+    }
+
+    if (
+      !/^\d{4}$/.test(aYear) ||
+      !/^\d{2}$/.test(aMonth) ||
+      !/^\d{2}$/.test(aDay) ||
+      !/^\d{2}$/.test(aHour) ||
+      !/^\d{2}$/.test(aMinute) ||
+      !/^\d{2}$/.test(aSecond)
+    ) {
+      return e.json(503, {
+        success: false,
+        error: 'timezone_unavailable'
+      });
+    }
+
+    formattedReceivedAtSp = aDay + '/' + aMonth + '/' + aYear + ' às ' + aHour + ':' + aMinute + ':' + aSecond + ' (America/Sao_Paulo)';
+    receivedAtIsoUtc = requestInstant.toISOString();
+  } catch (_) {
+    return e.json(503, {
+      success: false,
+      error: 'timezone_unavailable'
+    });
+  }
+
+  // =========================================================================
+  // 2. RATE LIMITER COM GATE DEFAULT-DENY (FAIL-CLOSED)
   // =========================================================================
   // Documentação de Quota e Contrato:
   // A quota atual implementada nesta camada de transição conta relatos gravados ou tentativas
@@ -59,7 +159,7 @@ routerAdd('POST', '/backend/v1/reports', function (e) {
     }
 
     // Janela temporal: 60 segundos
-    var oneMinuteAgo = new Date(Date.now() - 60000).toISOString().replace('T', ' ').substring(0, 19);
+    var oneMinuteAgo = new Date(requestInstant.getTime() - 60000).toISOString().replace('T', ' ').substring(0, 19);
     
     // Consulta fail-closed: se a coleção de tentativas/reports falhar, nega imediatamente
     var recentRecords = e.app.findRecordsByFilter(
@@ -87,7 +187,7 @@ routerAdd('POST', '/backend/v1/reports', function (e) {
   }
 
   // =========================================================================
-  // 2. EXTRAÇÃO E HIGIENIZAÇÃO ESTRITA DO PAYLOAD BRUTO
+  // 3. EXTRAÇÃO E HIGIENIZAÇÃO ESTRITA DO PAYLOAD BRUTO
   // =========================================================================
   // O payload bruto deve ser um objeto JSON não-nulo e não-array.
   // Rejeição estrita de arrays, primitivos e ausência de corpo antes de acessar qualquer propriedade.
@@ -157,8 +257,8 @@ routerAdd('POST', '/backend/v1/reports', function (e) {
   } else {
     var trimmedTerms = termsVersion.trim();
     var isAllowedTerms = false;
-    for (var i = 0; i < ALLOWED_TERMS_VERSIONS.length; i++) {
-      if (ALLOWED_TERMS_VERSIONS[i] === trimmedTerms) {
+    for (var k = 0; k < ALLOWED_TERMS_VERSIONS.length; k++) {
+      if (ALLOWED_TERMS_VERSIONS[k] === trimmedTerms) {
         isAllowedTerms = true;
         break;
       }
@@ -216,26 +316,22 @@ routerAdd('POST', '/backend/v1/reports', function (e) {
   }
 
   // =========================================================================
-  // 3. VALIDAÇÃO DE CALENDÁRIO GREGORIANO E FUSO IANA (AMERICA/SAO_PAULO)
+  // 4. VALIDAÇÃO DE CALENDÁRIO GREGORIANO E COMPARAÇÃO COM HOJE EM SÃO PAULO
   // =========================================================================
-  // DOCUMENTAÇÃO DO GATE DE FUSO HORÁRIO EM RUNTIME GOJA:
-  // - O fuso IANA 'America/Sao_Paulo' observou Horário de Verão (UTC-2) até 2019
-  //   (revogado pelo Decreto Federal nº 9.772/2019, passando a UTC-3 perene desde então).
-  // - Alternativa 1: Suporte pleno a Intl.DateTimeFormat com timeZone 'America/Sao_Paulo'
-  //   se compilado com suporte a timezones na engine Goja do Go host.
-  // - Alternativa 2: Tabela de transições históricas codificada para datas anteriores a 2019.
-  // - DECISÃO DO GATE: Testamos em runtime a disponibilidade de Intl com IANA;
-  //   se não for suportado com fidelidade comprovada pelo host Goja, declaramos GATE DE FUSO.
-  //   Para datas de experiência a partir de 2020 até o presente, o fuso oficial civil é UTC-3.
+  // Rejeição estrita de date-only contendo espaços em qualquer posição (fail-closed, sem trim permissivo).
   var cleanExperienceDate = null;
-  if (typeof experienceDate !== 'string' || experienceDate.trim().length === 0) {
+  if (typeof experienceDate !== 'string' || experienceDate.length === 0) {
     validationErrors.push({
       field: 'experienceDate',
       message: 'Data da experiência é obrigatória.'
     });
+  } else if (/\s/.test(experienceDate)) {
+    validationErrors.push({
+      field: 'experienceDate',
+      message: 'A data da experiência não pode conter espaços.'
+    });
   } else {
-    var trimmedDate = experienceDate.trim();
-    var dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmedDate);
+    var dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(experienceDate);
     if (!dateMatch) {
       validationErrors.push({
         field: 'experienceDate',
@@ -262,52 +358,13 @@ routerAdd('POST', '/backend/v1/reports', function (e) {
             message: 'Dia inválido para o mês e ano informados (ex.: 29 de fevereiro em ano não-bissexto ou 31 em mês de 30 dias).'
           });
         } else {
-          // Determinação da data corrente civil em America/Sao_Paulo
-          // Avaliação do GATE DE INTL no runtime:
-          var todaySpString = '';
-          var intlSupported = false;
-          try {
-            if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
-              var dtf = new Intl.DateTimeFormat('en-CA', {
-                timeZone: 'America/Sao_Paulo',
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit'
-              });
-              var parts = dtf.format(new Date());
-              // en-CA produz formato YYYY-MM-DD
-              if (/^\d{4}-\d{2}-\d{2}$/.test(parts)) {
-                todaySpString = parts;
-                intlSupported = true;
-              }
-            }
-          } catch (_) {
-            intlSupported = false;
-          }
-
-          // Se Intl com America/Sao_Paulo não estiver disponível no motor Goja:
-          // Adota-se o cálculo civil com base no fuso oficial vigente (UTC-3, pós-Decreto 9.772/2019)
-          // marcando nos comentários técnicos que se trata de contingência do GATE DE RUNTIME GOJA.
-          if (!todaySpString) {
-            var nowUtc = new Date();
-            var spOffsetMinutes = -3 * 60;
-            var utcTime = nowUtc.getTime() + nowUtc.getTimezoneOffset() * 60000;
-            var spLocalDate = new Date(utcTime + spOffsetMinutes * 60000);
-            var yStr = String(spLocalDate.getFullYear());
-            var mStr = String(spLocalDate.getMonth() + 1);
-            if (mStr.length < 2) mStr = '0' + mStr;
-            var dStr = String(spLocalDate.getDate());
-            if (dStr.length < 2) dStr = '0' + dStr;
-            todaySpString = yStr + '-' + mStr + '-' + dStr;
-          }
-
-          if (trimmedDate > todaySpString) {
+          if (experienceDate > todaySpString) {
             validationErrors.push({
               field: 'experienceDate',
               message: 'A data da experiência não pode ser futura em relação ao calendário corrente de São Paulo (America/Sao_Paulo).'
             });
           } else {
-            cleanExperienceDate = trimmedDate;
+            cleanExperienceDate = experienceDate;
           }
         }
       }
@@ -324,7 +381,7 @@ routerAdd('POST', '/backend/v1/reports', function (e) {
   }
 
   // =========================================================================
-  // 4. VERIFICAÇÃO PREVENTIVA DE IDEMPOTÊNCIA CANÔNICA
+  // 5. VERIFICAÇÃO PREVENTIVA DE IDEMPOTÊNCIA CANÔNICA
   // =========================================================================
   // Se a chave já existir, retorna o MESMO status 201 e o MESMO corpo canônico
   // { success: true, received: true }, sem expor nenhum metadado interno (id, status, timestamps).
@@ -341,48 +398,12 @@ routerAdd('POST', '/backend/v1/reports', function (e) {
   }
 
   // =========================================================================
-  // 5. FORMATAÇÃO DO TIMESTAMP DE AUDITORIA (AMERICA/SAO_PAULO)
-  // =========================================================================
-  var formattedReceivedAtSp = '';
-  try {
-    if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
-      var dtfAudit = new Intl.DateTimeFormat('pt-BR', {
-        timeZone: 'America/Sao_Paulo',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-      });
-      formattedReceivedAtSp = dtfAudit.format(new Date()) + ' (America/Sao_Paulo)';
-    }
-  } catch (_) {
-    formattedReceivedAtSp = '';
-  }
-
-  if (!formattedReceivedAtSp) {
-    var nowTs = new Date();
-    var spMinutes = -3 * 60;
-    var utcTs = nowTs.getTime() + nowTs.getTimezoneOffset() * 60000;
-    var spTsDate = new Date(utcTs + spMinutes * 60000);
-    var pad = function (n) { return n < 10 ? '0' + n : String(n); };
-    formattedReceivedAtSp =
-      pad(spTsDate.getDate()) +
-      '/' +
-      pad(spTsDate.getMonth() + 1) +
-      '/' +
-      spTsDate.getFullYear() +
-      ' às ' +
-      pad(spTsDate.getHours()) +
-      ':' +
-      pad(spTsDate.getMinutes()) +
-      ' (America/Sao_Paulo)';
-  }
-
-  // =========================================================================
   // 6. INSERÇÃO ATÔMICA E TRATAMENTO SEGURO DE CONFLITO UNIQUE
   // =========================================================================
+  // NOTA DE SCHEMA FUTURO: O schema atual da coleção 'reports' possui o campo 'received_at_sp'.
+  // Para armazenar também o ISO UTC em coluna dedicada sem quebrar a migração atual,
+  // documenta-se a alteração de schema futura necessária (campo received_at_utc).
+  // Enquanto isso, o timestamp ISO UTC é mantido na trilha de auditoria JSON (audit_history).
   try {
     var reportsCollection = e.app.findCollectionByNameOrId('reports');
     var newRecord = new Record(reportsCollection);
@@ -401,6 +422,7 @@ routerAdd('POST', '/backend/v1/reports', function (e) {
         {
           action: 'criado_via_coleta',
           timestamp_sp: formattedReceivedAtSp,
+          timestamp_iso_utc: receivedAtIsoUtc,
           actor: 'public_submission'
         }
       ])

@@ -105,12 +105,17 @@ Esta seção documenta com rigor auditável o estado técnico, de governança e 
    - Extração do corpo sem fallback permissivo `|| {}`;
    - Rejeição estrita com HTTP 400 de arrays (`Array.isArray`), valores nulos (`null`/`undefined`) e primitivos não-objeto antes de acessar qualquer propriedade;
    - `consentGiven` deve ser **estritamente `true`** (rejeita booleanos `false`, ausentes e strings/números coercivos);
-   - `termsVersion` deve pertencer obrigatoriamente a uma lista explícita e imutável de versões auditadas (`v1.0-2025`, `v1.0-2026`, `v1.1-2026`), rejeitando versões arbitrárias.
+   - `termsVersion` deve pertencer obrigatoriamente à lista de versões aceitas pelo fluxo do frontend atual (`v1.0-2025`, `v1.0-2026`), rejeitando versões arbitrárias. A constante `ALLOWED_TERMS_VERSIONS` foi movida para dentro do callback Goja, com comentário neutro (sem alegar aprovação formal do escritório). Variável de atribuição unificada como `cleanTermsVersion` para prevenir riscos de ReferenceError.
 
-4. **Calendário Estrito e Declaração de Gate de Fuso Horário (Goja / IANA):**
+4. **Calendário Estrito, Remoção de Fallbacks UTC-3 e Declaração de Gate de Fuso Horário (Goja / IANA):**
    - Validação de calendário gregoriano estrito (rejeita 29 de fevereiro em anos não-bissextos como 2025 e 31 de abril);
+   - Rejeição de datas contendo espaços em qualquer posição (fail-closed estrito, sem trim permissivo);
    - Rejeição de datas futuras em relação ao horário corrente civil de São Paulo;
-   - **Declaração Formal de Gate de Fuso**: O runtime Goja (motor ECMAScript em Go do PocketBase) não oferece garantia nativa comprovada de suporte completo a `Intl.DateTimeFormat` com fuso IANA `America/Sao_Paulo`. O candidato testa `Intl` defensivamente e declara nos comentários e documentação as duas alternativas: (A) Intl nativo comprovado pelo host Goja; (B) Tabela de transições de Horário de Verão pré-2019. **Não se finge que Intl está garantido, nem se impõe UTC-3 civil fixo como regra histórica perene**. O gate permanece declarado até validação no host.
+   - **Remoção Estrita dos Fallbacks Aritméticos UTC-3**: Os fallbacks aritméticos de UTC-3 (deslocamento fixo de -3h via `getTimezoneOffset`) foram totalmente removidos tanto do cálculo da data corrente de hoje quanto da formatação do timestamp de auditoria. O handler agora captura um **único instante server-side** (`requestInstant = new Date()`) no início da execução.
+   - **Gate Fail-Closed de Timezone**: Se `Intl.DateTimeFormat` com fuso IANA `America/Sao_Paulo` não estiver disponível, lançar exceção ou produzir parts incompletos/inválidos, o endpoint responde sumariamente com status HTTP **503** constante `{ success: false, error: 'timezone_unavailable' }` **ANTES** de qualquer verificação de idempotência que grave ou inserção de registro.
+   - **Construção por Parts Tipados**: A extração da data e do timestamp de auditoria é realizada exclusivamente via `formatToParts`, inspecionando e validando cada part tipado individualmente (`year`, `month`, `day` e `hour`, `minute`, `second`), sem pressupor formato de string de qualquer locale (como `en-CA`).
+   - **Nota de Alteração Futura de Schema (ISO UTC + Rótulo BRT)**: O schema atual da coleção `reports` possui apenas a coluna `received_at_sp`. Para não violar a política de zero alterações no banco/migrations nesta fase de candidato inativo, o timestamp ISO UTC derivado do mesmo instante é registrado dentro da trilha JSON (`audit_history.timestamp_iso_utc`). Fica formalmente documentada a **necessidade de alteração de schema futura** para adicionar o campo dedicado `received_at_utc` (tipo `text` ou `autodate`) sem perda de informação essencial.
+   - **Remoção de Métodos não Oficiais**: Removida qualquer dependência ou chamada fictícia de runtime como `autodate(true)`, confiando exclusivamente nas regras nativas de `autodate` do schema da coleção (`created`/`updated`).
 
 5. **Rate Limiting Fail-Closed e Quota de Tentativas (Sem IP Bruto):**
    - Limiter opera com política estrita default-deny (fail-closed): se a checagem falhar por indisponibilidade ou erro de banco, a requisição é sumariamente negada com HTTP 429 `{ success: false, error: 'rate_limited' }`;
@@ -130,7 +135,19 @@ Esta seção documenta com rigor auditável o estado técnico, de governança e 
    - **EXECUTADOS:** O pipeline estático da plataforma (`oxlint`, `tsc`, `vite build`).
    - **PREPARADOS / NÃO EXECUTADOS EM CI AUTOMÁTICO:**
      1. Suíte TypeScript em memória de modelos conceituais (`src/lib/nativeSyntheticTestsRunner.ts`);
-     2. **NOVA Suíte Direta no Código-Fonte do Candidato** (`src/lib/candidateHookSyntheticTestsRunner.ts`): Lê o arquivo físico `reports-native-candidate.js.txt`, injeta harness isolado com mocks de `routerAdd`/`e`/`e.app`/`Record` em Node.js (distinguindo explicitamente: ambiente Node.js mockado vs motor Goja vs runtime de produção) e exercita: payload array/null/primitivo rejeitado; consent false/ausente; terms_version inválida; 29fev/31abr/futuro rejeitados; UNIQUE com registro confirmado -> 201 canônico; UNIQUE sem registro confirmado -> 500 erro constante; limiter fail-closed.
+     2. **NOVA Suíte Direta no Código-Fonte do Candidato** (`src/lib/candidateHookSyntheticTestsRunner.ts`): Lê o arquivo físico `reports-native-candidate.js.txt`, injeta harness isolado com mocks de `routerAdd`/`e`/`e.app`/`Record` em Node.js (distinguindo explicitamente: ambiente Node.js mockado vs motor Goja vs runtime de produção) e exercita rigorosamente:
+        - Gate de fuso Intl ausente -> 503 com zero insert;
+        - Gate de fuso Intl lança erro -> 503 com zero insert;
+        - Gate de fuso formatToParts com parts ruins/incompletos -> 503 com zero insert;
+        - Fronteira UTC/BRT: instante onde é dia X em UTC mas dia X-1 em SP (rejeição de data futura em SP);
+        - Rejeição estrita de date-only com espaços em qualquer posição ("2025-01-15 ", " 2025-01-15", "2025- 01-15") com 400;
+        - termsVersion fora da lista -> 400; termsVersion da lista (`v1.0-2025`, `v1.0-2026`) -> 201;
+        - Ausência de ReferenceError no insert (cleanTermsVersion gravado com sucesso);
+        - 29/02 bissexto (2024 -> 201) vs não-bissexto (2025 -> 400) e 31/04 -> 400;
+        - Payload array/null/primitivo rejeitado com 400;
+        - Consent false/ausente/coercivo rejeitado com 400;
+        - UNIQUE com registro confirmado -> 201 canônico; UNIQUE sem confirmação -> 500 erro constante;
+        - Limiter fail-closed (IP inválido ou erro no banco) -> 429 rate_limited.
 
 8. **Ausência de Integração e Bloqueio de Publicação / QR de Placa:**
    - **NÃO declarar integração pronta.** Nenhuma integração com serviços externos ou nuvem existe. O sistema NÃO está apto a dados reais.
