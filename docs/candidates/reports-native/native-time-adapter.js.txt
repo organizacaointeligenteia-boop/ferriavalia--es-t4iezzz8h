@@ -1,0 +1,263 @@
+/**
+ * ADAPTER NATIVO CANDIDATO (INATIVO) — RESOLUÇÃO DE TEMPO NATIVO POCKETBASE JSVM
+ * Arquivo: docs/candidates/reports-native/native-time-adapter.js.txt
+ * Projeto: Ferri & Ferri — Relatos e Experiência
+ * ID do Projeto: 9d1a62e7-f60e-4585-aecf-107d6a652a9d
+ * Data de referência: 15/10/2026
+ *
+ * GOVERNANÇA:
+ * - Arquivo estritamente INATIVO (.js.txt), fora de pocketbase/hooks e pocketbase/migrations.
+ * - Não é autoexecutável nem integrado no candidato atual nesta rodada.
+ * - Não usa Intl (Goja não garante IANA) nem offset fixo/aritmético (-3h/UTC-3).
+ * - Neutraliza o risco central da API do PocketBase: new Timezone('invalido') retorna UTC silenciosamente.
+ *   Se a zone string for diferente de 'America/Sao_Paulo', rejeita imediatamente como timezone_unavailable.
+ */
+
+function resolveNativeTime(options) {
+  var opts = options || {};
+  var expectedTz = 'America/Sao_Paulo';
+
+  // 1. Verificação de ambiente dos construtores globais do host PocketBase JSVM
+  if (typeof DateTime !== 'function' || typeof Timezone !== 'function') {
+    return {
+      success: false,
+      statusCode: 503,
+      error: 'timezone_unavailable',
+      details: 'Host bindings DateTime or Timezone unavailable'
+    };
+  }
+
+  // 2. Resolução da Location via construtor oficial do PocketBase JSVM
+  var loc = null;
+  try {
+    loc = new Timezone(expectedTz);
+  } catch (errLoc) {
+    return {
+      success: false,
+      statusCode: 503,
+      error: 'timezone_unavailable',
+      details: 'Failed to instantiate Timezone location'
+    };
+  }
+
+  if (!loc || typeof loc !== 'object') {
+    return {
+      success: false,
+      statusCode: 503,
+      error: 'timezone_unavailable',
+      details: 'Location object is null or invalid'
+    };
+  }
+
+  // 3. Checagem essencial contra o risco central do PocketBase:
+  // Se Timezone() receber nome inválido ou falhar em carregar IANA, ele retorna "UTC".
+  // Validamos a zone string em loc.string() e String(loc). Deve ser EXATAMENTE 'America/Sao_Paulo'.
+  var locString = '';
+  try {
+    if (typeof loc.string === 'function') {
+      locString = loc.string();
+    } else {
+      locString = String(loc);
+    }
+  } catch (errStr) {
+    return {
+      success: false,
+      statusCode: 503,
+      error: 'timezone_unavailable',
+      details: 'Failed to obtain location zone string'
+    };
+  }
+
+  if (locString !== expectedTz) {
+    return {
+      success: false,
+      statusCode: 503,
+      error: 'timezone_unavailable',
+      details: 'Location zone mismatch or UTC fallback detected: ' + locString
+    };
+  }
+
+  // 4. Captura de UM ÚNICO DateTime de agora (reusado para todo o fluxo)
+  // Aceita injeção apenas para testes controlados via opts.nowOverride (instância DateTime)
+  var dt = null;
+  try {
+    dt = opts.nowOverride ? opts.nowOverride : new DateTime();
+  } catch (errDt) {
+    return {
+      success: false,
+      statusCode: 503,
+      error: 'timezone_unavailable',
+      details: 'Failed to capture single DateTime instant'
+    };
+  }
+
+  if (
+    !dt ||
+    typeof dt !== 'object' ||
+    typeof dt.time !== 'function' ||
+    typeof dt.unix !== 'function'
+  ) {
+    return {
+      success: false,
+      statusCode: 503,
+      error: 'timezone_unavailable',
+      details: 'DateTime instance missing required methods'
+    };
+  }
+
+  var epochSeconds = dt.unix();
+  if (typeof epochSeconds !== 'number' || !isFinite(epochSeconds) || epochSeconds <= 0) {
+    return {
+      success: false,
+      statusCode: 503,
+      error: 'timezone_unavailable',
+      details: 'DateTime unix epoch is non-finite or invalid'
+    };
+  }
+
+  // 5. Conversão via time().in(loc) nativo
+  var goTimeUtc = null;
+  var goTimeSp = null;
+  try {
+    goTimeUtc = dt.time();
+    if (!goTimeUtc || typeof goTimeUtc.in !== 'function') {
+      return {
+        success: false,
+        statusCode: 503,
+        error: 'timezone_unavailable',
+        details: 'Go time interface missing method in()'
+      };
+    }
+    goTimeSp = goTimeUtc.in(loc);
+  } catch (errIn) {
+    return {
+      success: false,
+      statusCode: 503,
+      error: 'timezone_unavailable',
+      details: 'Error executing time.in(loc)'
+    };
+  }
+
+  if (!goTimeSp || typeof goTimeSp.format !== 'function') {
+    return {
+      success: false,
+      statusCode: 503,
+      error: 'timezone_unavailable',
+      details: 'Converted time instance missing method format()'
+    };
+  }
+
+  // Validação adicional da Location associada ao objeto Time convertido
+  try {
+    if (typeof goTimeSp.location === 'function') {
+      var tLoc = goTimeSp.location();
+      var tLocString = (tLoc && typeof tLoc.string === 'function') ? tLoc.string() : String(tLoc);
+      if (tLocString !== expectedTz) {
+        return {
+          success: false,
+          statusCode: 503,
+          error: 'timezone_unavailable',
+          details: 'Converted time location mismatch: ' + tLocString
+        };
+      }
+    }
+  } catch (errTLoc) {
+    return {
+      success: false,
+      statusCode: 503,
+      error: 'timezone_unavailable',
+      details: 'Error verifying converted time location'
+    };
+  }
+
+  // 6. Formatações canônicas estritas com layouts Go oficiais
+  // Layouts de referência Go: "2006-01-02", "02/01/2006 às 15:04:05"
+  var todayDateSp = '';
+  var formattedReceivedAtSp = '';
+  var receivedAtIsoUtc = '';
+
+  try {
+    todayDateSp = goTimeSp.format('2006-01-02');
+    var timeAudit = goTimeSp.format('02/01/2006 às 15:04:05');
+    formattedReceivedAtSp = timeAudit + ' (America/Sao_Paulo)';
+
+    // ISO UTC do MESMO instante capturado no DateTime inicial
+    if (typeof goTimeUtc.format === 'function') {
+      receivedAtIsoUtc = goTimeUtc.format('2006-01-02T15:04:05.000Z07:00');
+    } else if (typeof dt.string === 'function') {
+      receivedAtIsoUtc = dt.string();
+    }
+  } catch (errFmt) {
+    return {
+      success: false,
+      statusCode: 503,
+      error: 'timezone_unavailable',
+      details: 'Error executing Go time format()'
+    };
+  }
+
+  // 7. Validação estrita das saídas geradas
+  // Date-only civil de hoje (AAAA-MM-DD)
+  var dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(todayDateSp);
+  if (!dateMatch) {
+    return {
+      success: false,
+      statusCode: 503,
+      error: 'timezone_unavailable',
+      details: 'Malformed today date-only string'
+    };
+  }
+
+  var y = parseInt(dateMatch[1], 10);
+  var m = parseInt(dateMatch[2], 10);
+  var d = parseInt(dateMatch[3], 10);
+
+  if (y < 1900 || y > 2100 || m < 1 || m > 12) {
+    return {
+      success: false,
+      statusCode: 503,
+      error: 'timezone_unavailable',
+      details: 'Out-of-range year or month in date-only'
+    };
+  }
+
+  var isLeap = (y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0);
+  var daysInMonth = [31, isLeap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (d < 1 || d > daysInMonth[m - 1]) {
+    return {
+      success: false,
+      statusCode: 503,
+      error: 'timezone_unavailable',
+      details: 'Invalid day of month in date-only'
+    };
+  }
+
+  // Validação do formato legível de auditoria SP
+  var auditRegex = /^\d{2}\/\d{2}\/\d{4} às \d{2}:\d{2}:\d{2} \(America\/Sao_Paulo\)$/;
+  if (!auditRegex.test(formattedReceivedAtSp)) {
+    return {
+      success: false,
+      statusCode: 503,
+      error: 'timezone_unavailable',
+      details: 'Malformed formatted audit timestamp'
+    };
+  }
+
+  // Validação do formato ISO UTC
+  if (typeof receivedAtIsoUtc !== 'string' || receivedAtIsoUtc.length < 10) {
+    return {
+      success: false,
+      statusCode: 503,
+      error: 'timezone_unavailable',
+      details: 'Invalid ISO UTC timestamp'
+    };
+  }
+
+  return {
+    success: true,
+    todayDateSp: todayDateSp,
+    formattedReceivedAtSp: formattedReceivedAtSp,
+    receivedAtIsoUtc: receivedAtIsoUtc,
+    epochSeconds: epochSeconds
+  };
+}
