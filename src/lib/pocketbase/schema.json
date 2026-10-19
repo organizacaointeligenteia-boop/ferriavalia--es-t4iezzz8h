@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-16T01:58:40.481Z",
+  "generatedAt": "2026-10-19T00:00:55.634Z",
   "collections": [
     {
       "name": "users",
@@ -135,12 +135,51 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "tipo",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["texto", "video"]
+        },
+        {
+          "name": "author",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "texto",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "video_file",
+          "type": "file",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "consentimento",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "status_novo",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["pendente", "aprovado", "oculto"]
         }
       ],
       "indexes": [
         "CREATE UNIQUE INDEX idx_reports_idempotency_key ON reports (idempotency_key)",
         "CREATE INDEX idx_reports_status_created ON reports (status, created DESC)",
-        "CREATE INDEX idx_reports_experience_date ON reports (experience_date DESC)"
+        "CREATE INDEX idx_reports_experience_date ON reports (experience_date DESC)",
+        "CREATE INDEX `idx_reports_status_novo_created` ON `reports` (status_novo, created DESC)"
       ]
     }
   ]

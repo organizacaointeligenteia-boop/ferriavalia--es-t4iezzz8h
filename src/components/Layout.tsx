@@ -17,26 +17,20 @@ export default function Layout() {
   const location = useLocation()
 
   const navLinks = [
-    { to: '/', label: 'Institucional', icon: Scale },
-    { to: '/relatar', label: 'Relatar Experiência', icon: FileText },
-    { to: '/painel', label: 'Painel Interno — DEMO', icon: LayoutDashboard },
-    { to: '/mural', label: 'Mural (Prévia)', icon: Eye },
+    { to: '/', label: 'Mural de Avaliações', icon: Eye },
+    { to: '/painel', label: 'Painel da Equipe', icon: LayoutDashboard },
   ]
 
   const closeMenu = () => setMobileMenuOpen(false)
 
   return (
     <div className="flex flex-col min-h-screen bg-[#F8FAFC] text-[#0F172A] font-sans antialiased selection:bg-[#C9A227] selection:text-[#0A1F33]">
-      {/* Top Banner de Demonstração Permanente */}
+      {/* Top Banner Oficial */}
       <div className="bg-[#071624] text-[#E5C048] px-4 py-1.5 text-xs font-medium text-center flex items-center justify-center gap-2 border-b border-[#C9A227]/30">
-        <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-[#C9A227]" aria-hidden="true" />
+        <Scale className="w-3.5 h-3.5 shrink-0 text-[#C9A227]" aria-hidden="true" />
         <span className="text-white/90">
-          <strong className="text-[#C9A227]">AMBIENTE DE DEMONSTRAÇÃO</strong> — Protótipo estático
-          em memória (dados fictícios{' '}
-          <code className="bg-[#0A1F33] text-[#E5C048] px-1 py-0.5 rounded text-[11px] border border-[#C9A227]/30">
-            E2E_SYNTH_
-          </code>
-          ). Nada é enviado a servidor algum.
+          <strong className="text-[#C9A227]">Ferri &amp; Ferri Advogados</strong> — Mural de
+          Avaliações e Relatos de Clientes. Publicação exclusiva após aprovação.
         </span>
       </div>
 
@@ -65,12 +59,9 @@ export default function Layout() {
 
           {/* Badge Central / Desktop */}
           <div className="hidden md:flex items-center">
-            <span
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#C9A227]/15 text-[#E5C048] border border-[#C9A227]/40 shadow-xs"
-              title="Este sistema é um protótipo estático sem persistência externa"
-            >
-              <AlertTriangle className="w-3 h-3 text-[#C9A227]" aria-hidden="true" />
-              DEMONSTRAÇÃO
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#C9A227]/15 text-[#E5C048] border border-[#C9A227]/40 shadow-xs">
+              <ShieldCheck className="w-3 h-3 text-[#C9A227]" aria-hidden="true" />
+              MURAL OFICIAL
             </span>
           </div>
 
@@ -105,7 +96,7 @@ export default function Layout() {
           {/* Botão Mobile Hamburger */}
           <div className="flex items-center gap-2 md:hidden">
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-[#C9A227]/20 text-[#E5C048] border border-[#C9A227]/40">
-              DEMO
+              MURAL
             </span>
             <button
               type="button"
@@ -139,12 +130,10 @@ export default function Layout() {
                     <FerriFerriLogo variant="mobile" className="h-7" />
                   </div>
                   <div className="text-xs font-bold text-[#C9A227] uppercase tracking-wider flex items-center gap-1.5">
-                    <AlertTriangle className="w-3.5 h-3.5" />
-                    Protótipo Demo
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    Ferri &amp; Ferri
                   </div>
-                  <p className="text-xs text-slate-300 mt-1">
-                    Canal Interno de Acolhimento e Relatos.
-                  </p>
+                  <p className="text-xs text-slate-300 mt-1">Mural de Avaliações e Relatos.</p>
                 </div>
 
                 <nav className="flex flex-col gap-2" aria-label="Navegação móvel">
@@ -176,7 +165,7 @@ export default function Layout() {
               <div className="pt-4 border-t border-white/15 text-xs text-slate-300 space-y-2">
                 <div className="flex items-start gap-1.5 text-[11px] leading-tight">
                   <ShieldCheck className="w-3.5 h-3.5 text-[#C9A227] shrink-0 mt-0.5" />
-                  <span>Ambiente sem backend, sem banco e sem tráfego de rede.</span>
+                  <span>Mural público embutível no site do escritório.</span>
                 </div>
               </div>
             </div>
@@ -205,24 +194,22 @@ export default function Layout() {
               </div>
             </div>
             <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold bg-[#C9A227]/15 text-[#E5C048] border border-[#C9A227]/30">
-              <AlertTriangle className="w-3 h-3 text-[#C9A227]" />
-              DEMONSTRAÇÃO — sem autenticação nem dados reais
+              <ShieldCheck className="w-3.5 h-3.5 text-[#C9A227]" />
+              Mural Público de Avaliações
             </div>
           </div>
-
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-[11px] leading-relaxed text-slate-300">
             <p>
-              <strong className="text-[#E5C048]">Publicidade jurídica e ética:</strong> Publicação e
-              divulgação desativadas, pendentes de revisão ética OAB e decisão do responsável.
+              <strong className="text-[#E5C048]">Privacidade:</strong> Seu relato pode ser removido
+              a qualquer tempo mediante solicitação ao escritório.
             </p>
-            <p className="shrink-0 text-slate-400">Ambiente de demonstração ≠ Divulgação pública</p>
+            <p className="shrink-0 text-slate-400">Ferri &amp; Ferri Advogados © 2026</p>
           </div>
-
           <div className="pt-2 text-[11px] text-slate-400 flex flex-wrap gap-x-4 gap-y-1">
-            <span>• Único escritório (não é SaaS / sem venda a advogados)</span>
-            <span>• Sem cadastro de CPF, processo ou documentos</span>
-            <span>• Dados fictícios voláteis (em memória, descartados ao recarregar)</span>
-          </div>
+            <span>• Exclusivo para o escritório Ferri &amp; Ferri Advogados</span>
+            <span>• Envio em texto ou gravação de vídeo no navegador</span>
+            <span>• Exibição no mural somente após aprovação da equipe</span>
+          </div>{' '}
         </div>
       </footer>
     </div>

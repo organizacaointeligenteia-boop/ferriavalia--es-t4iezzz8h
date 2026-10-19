@@ -5,9 +5,7 @@ import { Toaster as Sonner } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ReportsProvider } from '@/context/ReportsContext'
 import Index from './pages/Index'
-import Relatar from './pages/Relatar'
 import Painel from './pages/Painel'
-import Mural from './pages/Mural'
 import NotFound from './pages/NotFound'
 import Layout from './components/Layout'
 
@@ -23,9 +21,10 @@ const App = () => (
         <Routes>
           <Route element={<Layout />}>
             <Route path="/" element={<Index />} />
-            <Route path="/relatar" element={<Relatar />} />
             <Route path="/painel" element={<Painel />} />
-            <Route path="/mural" element={<Mural />} />
+            {/* Redirecionamentos de rotas antigas para manter retrocompatibilidade */}
+            <Route path="/mural" element={<Index />} />
+            <Route path="/relatar" element={<Index />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>
