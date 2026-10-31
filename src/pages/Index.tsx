@@ -57,6 +57,8 @@ export default function Index() {
   const [recordedVideoUrl, setRecordedVideoUrl] = useState<string | null>(null)
   const [recordingTime, setRecordingTime] = useState(0)
   const [cameraError, setCameraError] = useState<string | null>(null)
+  const [cameraLoading, setCameraLoading] = useState(false)
+  const [cameraActive, setCameraActive] = useState(false)
 
   const videoPreviewRef = useRef<HTMLVideoElement | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -87,44 +89,150 @@ export default function Index() {
       streamRef.current.getTracks().forEach((track) => track.stop())
       streamRef.current = null
     }
+    if (videoPreviewRef.current) {
+      videoPreviewRef.current.srcObject = null
+    }
     if (timerRef.current) {
       clearInterval(timerRef.current)
       timerRef.current = null
     }
     setIsRecording(false)
+    setCameraActive(false)
+    setCameraLoading(false)
   }
 
-  // Abre câmera
+  // Abre câmera com tratamento resiliente (áudio/vídeo e fallback)
   const startCamera = async () => {
     setCameraError(null)
-    setRecordedBlob(null)
-    setRecordedVideoUrl(null)
+    setCameraLoading(true)
+
+    // Se já havia stream anterior, encerra
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+    }
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setCameraError('Seu navegador não suporta captura direta de vídeo da câmera.')
+      setCameraLoading(false)
+      return
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
-        audio: true,
-      })
+      let stream: MediaStream
+      try {
+        // Tenta câmera frontal/usuário com áudio
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'user',
+            width: { ideal: 1280, max: 1920 },
+            height: { ideal: 720, max: 1080 },
+          },
+          audio: true,
+        })
+      } catch (audioOrConstraintsErr) {
+        // Fallback: se falhar por restrição ou áudio, tenta só vídeo ou genérico
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true,
+          })
+        } catch (_) {
+          // Último recurso: somente vídeo
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          })
+        }
+      }
+
       streamRef.current = stream
+      setCameraActive(true)
+
+      // Vincula ao elemento <video> caso já esteja montado
       if (videoPreviewRef.current) {
         videoPreviewRef.current.srcObject = stream
-        videoPreviewRef.current.play()
+        try {
+          await videoPreviewRef.current.play()
+        } catch (_) {
+          // Autoplay policy pode ser silencioso em muted
+        }
       }
-    } catch (err) {
-      setCameraError(
-        'Não foi possível acessar a câmera ou microfone. Verifique as permissões do seu navegador.',
-      )
+    } catch (err: unknown) {
+      const errorObj = err as { name?: string; message?: string }
+      if (errorObj?.name === 'NotAllowedError' || errorObj?.name === 'PermissionDeniedError') {
+        setCameraError(
+          'Permissão de câmera ou microfone negada. Autorize o acesso no ícone de cadeado do seu navegador para filmar seu relato.',
+        )
+      } else if (errorObj?.name === 'NotFoundError' || errorObj?.name === 'DevicesNotFoundError') {
+        setCameraError('Nenhuma câmera ou microfone foi detectado no seu dispositivo.')
+      } else if (errorObj?.name === 'NotReadableError' || errorObj?.name === 'TrackStartError') {
+        setCameraError(
+          'A câmera já está sendo usada por outro aplicativo ou aba do navegador. Feche o outro programa e tente novamente.',
+        )
+      } else {
+        setCameraError(
+          'Não foi possível inicializar a câmera. Verifique as permissões de vídeo e microfone do seu navegador.',
+        )
+      }
+      setCameraActive(false)
+    } finally {
+      setCameraLoading(false)
     }
   }
 
+  // Quando o modo vídeo estiver ativo no modal e não houver vídeo gravado pronto, garante que a câmera abra e se conecte ao <video>
+  useEffect(() => {
+    if (
+      modalOpen &&
+      mode === 'video' &&
+      !recordedVideoUrl &&
+      !streamRef.current &&
+      !cameraLoading &&
+      !cameraError
+    ) {
+      startCamera()
+    }
+  }, [modalOpen, mode, recordedVideoUrl, cameraLoading, cameraError])
+
+  // Vincula stream ativo ao videoPreviewRef sempre que ele for montado ou o stream mudar
+  useEffect(() => {
+    if (videoPreviewRef.current && streamRef.current && !recordedVideoUrl) {
+      if (videoPreviewRef.current.srcObject !== streamRef.current) {
+        videoPreviewRef.current.srcObject = streamRef.current
+        videoPreviewRef.current.play().catch(() => {})
+      }
+    }
+  })
+
   // Inicia gravação
   const startRecording = () => {
-    if (!streamRef.current) return
+    if (!streamRef.current) {
+      startCamera()
+      return
+    }
     chunksRef.current = []
     try {
-      const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-        ? 'video/webm;codecs=vp9'
-        : 'video/webm'
-      const recorder = new MediaRecorder(streamRef.current, { mimeType: mime })
+      // Determina o melhor mimeType suportado no navegador (Chrome, Safari, Firefox, Edge)
+      const mimeTypes = [
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
+        'video/mp4;codecs=avc1,mp4a.40.2',
+        'video/mp4',
+      ]
+      let selectedMime = ''
+      if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported) {
+        for (const m of mimeTypes) {
+          if (MediaRecorder.isTypeSupported(m)) {
+            selectedMime = m
+            break
+          }
+        }
+      }
+
+      const options: MediaRecorderOptions = selectedMime ? { mimeType: selectedMime } : {}
+      const recorder = new MediaRecorder(streamRef.current, options)
 
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) {
@@ -133,10 +241,12 @@ export default function Index() {
       }
 
       recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'video/webm' })
+        const finalType = recorder.mimeType || selectedMime || 'video/webm'
+        const blob = new Blob(chunksRef.current, { type: finalType })
         setRecordedBlob(blob)
-        setRecordedVideoUrl(URL.createObjectURL(blob))
-        // Para a câmera após a gravação
+        const objectUrl = URL.createObjectURL(blob)
+        setRecordedVideoUrl(objectUrl)
+        // Libera a câmera física após concluir a gravação
         stopCameraStream()
       }
 
@@ -155,7 +265,7 @@ export default function Index() {
         })
       }, 1000)
     } catch (e) {
-      setCameraError('Erro ao iniciar a gravação do vídeo.')
+      setCameraError('Erro ao iniciar a gravação do vídeo. Tente novamente.')
     }
   }
 
@@ -171,13 +281,14 @@ export default function Index() {
     setIsRecording(false)
   }
 
-  // Reset do vídeo para regravar
+  // Reset do vídeo para regravar (descartar gravação atual e reabrir a câmera)
   const handleRetakeVideo = () => {
     if (recordedVideoUrl) {
       URL.revokeObjectURL(recordedVideoUrl)
     }
     setRecordedBlob(null)
     setRecordedVideoUrl(null)
+    setCameraError(null)
     startCamera()
   }
 
@@ -200,15 +311,17 @@ export default function Index() {
     if (recordedVideoUrl) {
       URL.revokeObjectURL(recordedVideoUrl)
     }
+    setRecordedBlob(null)
+    setRecordedVideoUrl(null)
     setModalOpen(false)
   }
 
   // Troca para modo vídeo
   const handleSwitchToVideo = () => {
     setMode('video')
-    setTimeout(() => {
+    if (!recordedVideoUrl && !streamRef.current) {
       startCamera()
-    }, 100)
+    }
   }
 
   // Troca para modo texto
@@ -587,63 +700,139 @@ export default function Index() {
                   )}
 
                   {/* Preview da Câmera ou Reprodução do Vídeo Gravado */}
-                  <div className="relative bg-slate-950 rounded-xl overflow-hidden aspect-video flex items-center justify-center border border-slate-300 shadow-inner">
+                  <div className="relative bg-slate-950 rounded-xl overflow-hidden aspect-video flex items-center justify-center border border-slate-300 shadow-inner group/viewer">
                     {recordedVideoUrl ? (
-                      <video
-                        src={recordedVideoUrl}
-                        controls
-                        className="w-full h-full object-cover"
-                      />
+                      /* Vídeo gravado pronto para revisão do usuário */
+                      <div className="relative w-full h-full flex flex-col justify-center bg-black">
+                        <video
+                          key={recordedVideoUrl}
+                          src={recordedVideoUrl}
+                          controls
+                          playsInline
+                          autoPlay
+                          className="w-full h-full object-contain"
+                        />
+                        <div className="absolute top-2.5 left-2.5 pointer-events-none bg-emerald-600/90 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm backdrop-blur-xs">
+                          <CheckCircle2 className="w-3 h-3 text-white" />
+                          <span>Pré-visualização do vídeo</span>
+                        </div>
+                      </div>
                     ) : (
-                      <video
-                        ref={videoPreviewRef}
-                        muted
-                        playsInline
-                        className="w-full h-full object-cover"
-                      />
-                    )}
+                      /* Feed ao vivo da webcam */
+                      <div className="relative w-full h-full flex items-center justify-center bg-slate-950">
+                        <video
+                          ref={videoPreviewRef}
+                          muted
+                          autoPlay
+                          playsInline
+                          className="w-full h-full object-cover scale-x-[-1]"
+                        />
 
-                    {/* Contador de tempo de gravação */}
-                    {isRecording && (
-                      <div className="absolute top-3 left-3 bg-red-600 text-white text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-md animate-pulse">
-                        <span className="w-2 h-2 rounded-full bg-white" />
-                        <span>00:{String(recordingTime).padStart(2, '0')} / 01:00</span>
+                        {/* Estado de carregamento ou sem stream */}
+                        {cameraLoading && (
+                          <div className="absolute inset-0 bg-slate-950/80 flex flex-col items-center justify-center text-white gap-2 z-10">
+                            <Loader2 className="w-6 h-6 animate-spin text-[#C9A227]" />
+                            <span className="text-xs text-slate-300">Conectando sua câmera...</span>
+                          </div>
+                        )}
+
+                        {!cameraLoading && !cameraActive && !cameraError && (
+                          <div className="absolute inset-0 bg-slate-950 flex flex-col items-center justify-center text-slate-400 gap-2 p-4 text-center">
+                            <Camera className="w-8 h-8 text-slate-500" />
+                            <p className="text-xs text-slate-400 max-w-xs">
+                              Clique em "Ativar Câmera" para se ver na tela antes de iniciar.
+                            </p>
+                            <button
+                              type="button"
+                              onClick={startCamera}
+                              className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[#0A1F33] text-[#E5C048] border border-[#C9A227]/40 text-xs font-semibold hover:bg-[#132E4A] cursor-pointer"
+                            >
+                              <Camera className="w-3.5 h-3.5 text-[#C9A227]" />
+                              <span>Ativar Câmera</span>
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Indicador ao vivo */}
+                        {cameraActive && !isRecording && (
+                          <div className="absolute top-2.5 left-2.5 bg-black/60 text-emerald-400 text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1.5 shadow-xs border border-emerald-500/30 backdrop-blur-xs">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            <span>Câmera conectada • Você está se vendo</span>
+                          </div>
+                        )}
+
+                        {/* Contador de tempo de gravação em andamento */}
+                        {isRecording && (
+                          <div className="absolute top-3 left-3 bg-red-600 text-white text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-md animate-pulse z-10">
+                            <span className="w-2 h-2 rounded-full bg-white" />
+                            <span>
+                              Gravando 00:{String(recordingTime).padStart(2, '0')} / 01:00
+                            </span>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
 
-                  {/* Controles de Gravação */}
-                  <div className="flex items-center justify-center gap-3 pt-1">
+                  {/* Controles de Gravação e Revisão */}
+                  <div className="flex flex-col items-center justify-center gap-2 pt-1">
                     {!recordedVideoUrl ? (
                       !isRecording ? (
-                        <button
-                          type="button"
-                          onClick={startRecording}
-                          disabled={!!cameraError}
-                          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-red-600 text-white text-xs font-bold hover:bg-red-700 transition-colors cursor-pointer disabled:opacity-50 shadow-xs"
-                        >
-                          <Camera className="w-4 h-4" />
-                          <span>Iniciar Gravação</span>
-                        </button>
+                        <div className="flex flex-wrap items-center justify-center gap-2.5">
+                          <button
+                            type="button"
+                            onClick={startRecording}
+                            disabled={cameraLoading || (!!cameraError && !cameraActive)}
+                            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-red-600 text-white text-xs font-bold hover:bg-red-700 transition-colors cursor-pointer disabled:opacity-50 shadow-xs active:scale-[0.98]"
+                          >
+                            <Camera className="w-4 h-4" />
+                            <span>{cameraActive ? 'Gravar Vídeo' : 'Ativar e Gravar'}</span>
+                          </button>
+                          {!cameraActive && (
+                            <button
+                              type="button"
+                              onClick={startCamera}
+                              disabled={cameraLoading}
+                              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-50 transition-colors cursor-pointer"
+                            >
+                              <Camera className="w-3.5 h-3.5 text-slate-500" />
+                              <span>Testar Câmera</span>
+                            </button>
+                          )}
+                        </div>
                       ) : (
                         <button
                           type="button"
                           onClick={stopRecording}
-                          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-slate-900 text-white text-xs font-bold hover:bg-black transition-colors cursor-pointer shadow-xs"
+                          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-slate-900 text-white text-xs font-bold hover:bg-black transition-colors cursor-pointer shadow-xs active:scale-[0.98]"
                         >
                           <Square className="w-3.5 h-3.5 fill-white" />
                           <span>Concluir Gravação</span>
                         </button>
                       )
                     ) : (
-                      <button
-                        type="button"
-                        onClick={handleRetakeVideo}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-50 transition-colors cursor-pointer"
-                      >
-                        <RefreshCw className="w-3.5 h-3.5" />
-                        <span>Gravar Novamente</span>
-                      </button>
+                      /* Painel de Ações pós-gravação: Regravar (descartar) ou Confirmar para salvar */
+                      <div className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between gap-2.5">
+                        <div className="text-left w-full sm:w-auto">
+                          <p className="text-xs font-bold text-[#0A1F33] flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span>Vídeo pronto para envio!</span>
+                          </p>
+                          <p className="text-[11px] text-slate-500">
+                            Assista à gravação acima. Se não gostar, pode regravar.
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                          <button
+                            type="button"
+                            onClick={handleRetakeVideo}
+                            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-semibold hover:bg-slate-100 hover:text-slate-900 transition-colors cursor-pointer shadow-2xs"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
+                            <span>Regravar (descartar)</span>
+                          </button>
+                        </div>
+                      </div>
                     )}
                   </div>
 
@@ -723,11 +912,13 @@ export default function Index() {
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting || !consentimento}
+                  disabled={submitting || !consentimento || (mode === 'video' && !recordedBlob)}
                   className="px-6 py-2.5 rounded-lg bg-[#0A1F33] text-[#E5C048] border border-[#C9A227]/40 text-xs font-bold hover:bg-[#132E4A] hover:shadow-md active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer shadow-xs"
                 >
                   {submitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  <span>Enviar Relato</span>
+                  <span>
+                    {mode === 'video' && recordedBlob ? 'Salvar e Enviar Vídeo' : 'Enviar Relato'}
+                  </span>
                 </button>
               </div>
             </form>
