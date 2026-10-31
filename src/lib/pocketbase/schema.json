@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-19T00:00:55.634Z",
+  "generatedAt": "2026-10-31T19:15:06.883Z",
   "collections": [
     {
       "name": "users",
@@ -48,11 +48,11 @@
       "name": "reports",
       "type": "base",
       "apiRules": {
-        "list": null,
-        "view": null,
-        "create": null,
-        "update": null,
-        "delete": null
+        "list": "status_novo = 'aprovado'",
+        "view": "status_novo = 'aprovado'",
+        "create": "@request.body.status_novo:changed = false || @request.body.status_novo = 'pendente'",
+        "update": "@request.auth.id != '' && @request.auth.collectionName = 'users'",
+        "delete": "@request.auth.id != '' && @request.auth.collectionName = 'users'"
       },
       "fields": [
         {
