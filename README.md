@@ -30,7 +30,7 @@ Para embutir o Mural de Avaliações diretamente dentro de qualquer página do s
 <!-- Ferri & Ferri — Snippet de Embed do Mural de Avaliações -->
 <div style="width: 100%; max-width: 1100px; margin: 0 auto; overflow: hidden; border-radius: 12px; box-shadow: 0 4px 20px rgba(10, 31, 51, 0.08);">
   <iframe
-    src="https://ferri-ferri-relatos-e-experiencia-dbf86.shrd01.internal.goskip.dev"
+    src="https://ferri-ferri-relatos-e-experiencia-dbf86.goskip.app"
     title="Mural de Avaliações — Ferri & Ferri Advogados"
     width="100%"
     height="750"
@@ -40,6 +40,10 @@ Para embutir o Mural de Avaliações diretamente dentro de qualquer página do s
   ></iframe>
 </div>
 ```
+
+### URL Oficial de Produção e QR Code
+- **URL do Mural:** `https://ferri-ferri-relatos-e-experiencia-dbf86.goskip.app`
+- **QR Code e Gerador de Placa:** Disponível no **Painel da Equipe** (`/painel`), com download direto em imagem PNG e link para cópia rápida.
 
 > **Nota sobre permissões:** O atributo `allow="camera; microphone;"` é necessário para permitir que o cliente consiga gravar vídeo diretamente pelo navegador caso opte pela opção "Filmar".
 

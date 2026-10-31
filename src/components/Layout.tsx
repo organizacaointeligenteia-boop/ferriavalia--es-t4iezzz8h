@@ -189,7 +189,7 @@ export default function Layout() {
                   Relatos e Experiência do Cliente
                 </div>
                 <div className="text-[10px] text-slate-400">
-                  Canal de demonstração, sem dados reais
+                  Canal oficial de relatos e avaliações
                 </div>
               </div>
             </div>

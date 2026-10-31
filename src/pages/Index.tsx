@@ -26,34 +26,6 @@ import {
   ReportRecord,
 } from '@/services/reports'
 
-// Exemplos iniciais ilustrativos caso o banco ainda esteja vazio (apenas para exibição inicial agradável)
-const INITIAL_DEMO_REPORTS: ReportRecord[] = [
-  {
-    id: 'demo-1',
-    created: '2026-10-15T14:30:00Z',
-    updated: '2026-10-15T14:30:00Z',
-    author: 'Mariana S.',
-    tipo: 'texto',
-    texto:
-      'Excelente atendimento e total pontualidade. A equipe explicou com toda a clareza e transparência os passos da nossa consulta.',
-    consentimento: true,
-    status_novo: 'aprovado',
-    received_at_sp: '15/10/2026 às 14:30 (America/Sao_Paulo)',
-  },
-  {
-    id: 'demo-2',
-    created: '2026-10-14T10:15:00Z',
-    updated: '2026-10-14T10:15:00Z',
-    author: 'Anônimo',
-    tipo: 'texto',
-    texto:
-      'Cordialidade impecável e ambiente muito acolhedor. Ficamos muito satisfeitos com a dedicação dos profissionais da Ferri & Ferri.',
-    consentimento: true,
-    status_novo: 'aprovado',
-    received_at_sp: '14/10/2026 às 10:15 (America/Sao_Paulo)',
-  },
-]
-
 // Extrai até 2 iniciais do nome para o avatar elegante
 function getInitials(name?: string): string {
   if (!name || name.trim().toLowerCase() === 'anônimo') return ''
@@ -92,18 +64,14 @@ export default function Index() {
   const chunksRef = useRef<Blob[]>([])
   const timerRef = useRef<number | null>(null)
 
-  // Carrega relatos aprovados ao montar a página
+  // Carrega relatos aprovados ao montar a página (somente dados reais do banco)
   const loadReports = async () => {
     setLoading(true)
     try {
       const data = await listApprovedReports()
-      if (data && data.length > 0) {
-        setReports(data)
-      } else {
-        setReports(INITIAL_DEMO_REPORTS)
-      }
+      setReports(data || [])
     } catch (_) {
-      setReports(INITIAL_DEMO_REPORTS)
+      setReports([])
     } finally {
       setLoading(false)
     }

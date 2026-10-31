@@ -16,6 +16,7 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import pb from '@/lib/pocketbase/client'
+import SharingSection from '@/components/SharingSection'
 import {
   listAllReportsForStaff,
   updateReportStatusByStaff,
@@ -214,13 +215,13 @@ export default function Painel() {
 
   // TELA 2: GESTÃO DE RELATOS (Autenticado)
   return (
-    <div className="space-y-6 animate-fade-in pb-12">
+    <div className="space-y-8 animate-fade-in pb-12">
       {/* Top Header do Painel */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
         <div>
-          <h1 className="text-2xl font-bold text-[#0A1F33] tracking-tight">Moderação de Relatos</h1>
+          <h1 className="text-2xl font-bold text-[#0A1F33] tracking-tight">Painel da Equipe</h1>
           <p className="text-xs text-slate-600">
-            Aprove, oculte ou exclua relatos enviados pelos clientes.
+            Moderação de relatos, geração de QR Code, link público e integração do mural.
           </p>
         </div>
 
@@ -243,6 +244,19 @@ export default function Painel() {
             Sair
           </button>
         </div>
+      </div>
+
+      {/* Seção Compartilhar: Link Copiável, QR Code PNG e Embed Iframe */}
+      <SharingSection />
+
+      {/* Título da Seção de Moderação */}
+      <div className="pt-2">
+        <h2 className="text-lg font-bold text-[#0A1F33] tracking-tight">
+          Fila de Relatos e Moderação
+        </h2>
+        <p className="text-xs text-slate-500">
+          Aprove para exibir no mural público, oculte temporariamente ou exclua definitivamente.
+        </p>
       </div>
 
       {/* Filtros com Contadores */}
